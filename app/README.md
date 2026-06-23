@@ -8,11 +8,14 @@
 
 ```bash
 php -S 127.0.0.1:8080 -t app/public
-# UI:        http://127.0.0.1:8080/index.php
-# Настройки: http://127.0.0.1:8080/setup.php   (пароль = ADMIN_PASSWORD)
+# Лендинг:   http://127.0.0.1:8080/          (кнопка → /app/)
+# Анализ:    http://127.0.0.1:8080/app/      (рабочее приложение)
+# Настройки: http://127.0.0.1:8080/setup.php (пароль = ADMIN_PASSWORD)
 
 # Слежение за папкой (auto-ingest .xls):
 php app/bin/watch.php 5
+# При появлении нового файла демон открывает APP_URL в браузере оператора
+# (по умолчанию http://neuropro.skywood.club/app/; пусто — выключено).
 ```
 
 ### Windows (локально)
