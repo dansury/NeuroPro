@@ -35,10 +35,31 @@ function watch_err(string $line): void {
     fflush(STDERR);
 }
 
+/**
+ * Открыть URL приложения анализа в браузере оператора. Кроссплатформенно:
+ * Windows (`start`), macOS (`open`), *nix (`xdg-open`). Best-effort — любые
+ * ошибки заглушаются, чтобы не прерывать наблюдение за папкой.
+ */
+function watch_open_browser(string $url): void {
+    if ($url === '') return;
+    $arg = escapeshellarg($url);
+    if (stripos(PHP_OS_FAMILY, 'Windows') !== false) {
+        // `start` — встроенная команда cmd; первый "" — это заголовок окна.
+        $cmd = 'start "" ' . $arg;
+        $proc = @popen('cmd /c ' . $cmd, 'r');
+        if (is_resource($proc)) { @pclose($proc); }
+        return;
+    }
+    $bin = PHP_OS_FAMILY === 'Darwin' ? 'open' : 'xdg-open';
+    @exec($bin . ' ' . $arg . ' > /dev/null 2>&1 &');
+}
+
 $cfg = np_boot();
 $interval = max(2, (int) ($argv[1] ?? 5));
 // Нормализуем путь: убираем хвостовые слэши обоих видов (Windows: «C:\incoming\»).
 $dir = rtrim((string) $cfg['WATCH_DIR'], "/\\");
+// URL приложения анализа: открываем в браузере при появлении нового файла.
+$appUrl = (string) ($cfg['APP_URL'] ?? '');
 
 if ($dir === '' || !is_dir($dir)) {
     watch_err("[watch] ! Папка наблюдения не найдена: «{$dir}». Проверьте WATCH_DIR.\n");
@@ -46,6 +67,9 @@ if ($dir === '' || !is_dir($dir)) {
 }
 
 watch_out("[watch] Наблюдаю за: {$dir} (каждые {$interval}с)\n");
+if ($appUrl !== '') {
+    watch_out("[watch] При новом файле открою: {$appUrl}\n");
+}
 
 Db::pdo()->exec("CREATE TABLE IF NOT EXISTS watch_seen (hash TEXT PRIMARY KEY, path TEXT, profile_id INTEGER, seen_at TEXT DEFAULT (datetime('now')))");
 
@@ -80,6 +104,7 @@ while (true) {
         }
     }
 
+    $ingested = 0;
     foreach (array_keys($stable) as $file) {
         unset($pending[$file]);
         $hash = sha1_file($file);
@@ -94,11 +119,19 @@ while (true) {
                  json_encode($prof['scores'], JSON_UNESCAPED_UNICODE), $file, 'awaiting_screenshot']
             );
             Db::q('INSERT INTO watch_seen (hash, path, profile_id) VALUES (?,?,?)', [$hash, $file, $id]);
+            $ingested++;
             watch_out("[watch] + Профиль #{$id}: {$prof['name']} / {$prof['methodic']} — ожидает скриншот\n");
         } catch (Throwable $e) {
             Db::q('INSERT OR IGNORE INTO watch_seen (hash, path, profile_id) VALUES (?,?,?)', [$hash, $file, 0]);
             watch_err("[watch] ! Ошибка с {$file}: " . $e->getMessage() . "\n");
         }
+    }
+
+    // Появился хотя бы один новый профиль — открываем приложение анализа в
+    // браузере оператора (один раз за цикл, чтобы не плодить вкладки).
+    if ($ingested > 0 && $appUrl !== '') {
+        watch_open_browser($appUrl);
+        watch_out("[watch] → Открываю {$appUrl}\n");
     }
 
     // Подчищаем из pending пути исчезнувших файлов, чтобы карта не росла.

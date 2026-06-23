@@ -87,11 +87,13 @@ app/
     settings_store.php# key/value стор настроек
     bootstrap.php     # Загрузка config, init DB+LLM, сидинг промптов
   public/
-    index.php         # Фронт-контроллер (роуты ?p=...)
+    index.php         # Лендинг «/» (кнопка → /app/)
+    app/index.php     # Фронт-контроллер приложения анализа «/app/» (роуты ?p=...)
     setup.php         # Настройки провайдера/модели/OCR/SMTP (пароль ADMIN_PASSWORD)
     assets/logo.png   # Логотип бренда
   bin/
-    watch.php         # Демон слежения за папкой: новый .xls → профиль «ожидает скриншот»
+    watch.php         # Демон слежения за папкой: новый .xls → профиль «ожидает скриншот»;
+                      # открывает APP_URL (/app/) в браузере оператора
   data/               # SQLite + логи + загрузки + incoming (gitignored)
 Sources/              # Исходники заказчика: промпты, образец .xls/.pdf, лого, референс
 specs/001-neuropro-service/   # Spec Kit: спека, план, задачи этой фичи

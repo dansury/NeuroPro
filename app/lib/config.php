@@ -86,6 +86,9 @@ $config = [
     /* ── NeuroPro service ── */
     // Folder watched for new Эгоскоп .xls exports (auto-ingest → await screenshot).
     'WATCH_DIR'             => cfg_env('WATCH_DIR', dirname(__DIR__) . '/data/incoming'),
+    // Public URL of the analysis app. The watch-folder daemon opens it in the
+    // operator's browser when a new file is ingested. Empty disables auto-open.
+    'APP_URL'               => cfg_env('APP_URL', 'http://neuropro.skywood.club/app/'),
     'UPLOAD_DIR'            => cfg_env('UPLOAD_DIR', dirname(__DIR__) . '/data/uploads'),
     'BRAND_NAME'            => cfg_env('BRAND_NAME', 'Центр корпоративной психологии «НейроПро»'),
     'BRAND_PHONE'          => cfg_env('BRAND_PHONE', '8-917-859-60-79'),
