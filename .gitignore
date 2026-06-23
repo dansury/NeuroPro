@@ -1,0 +1,16 @@
+# Runtime data (SQLite DB, logs, uploads, watch inbox) — never committed
+app/data/*.db
+app/data/*.db-wal
+app/data/*.db-shm
+app/data/logs/
+app/data/uploads/
+app/data/incoming/
+
+# Local env / secrets
+.env
+app/.env
+
+# OS / editor
+.DS_Store
+*.swp
+node_modules/
