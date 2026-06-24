@@ -5,7 +5,7 @@
 return [
     'repo'       => 'dansury/neuropro',
     'branch'     => 'main',
-    'subdir'     => '.',
+    'subdir'     => '/app/public',
     'secret'     => '',
     'gh_token'   => 
 'github_pat_...',
