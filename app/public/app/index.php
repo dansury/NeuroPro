@@ -12,12 +12,16 @@ require_once __DIR__ . '/../../lib/bootstrap.php';
 require_once __DIR__ . '/../../lib/excel.php';
 require_once __DIR__ . '/../../lib/chart.php';
 
-$cfg = np_boot();
 $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-$page = $_GET['p'] ?? 'dashboard';
-$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
+    // Бутстрап (config + БД + LLM + сидинг) держим ВНУТРИ try: при сбое — например
+    // нет прав на запись в app/data/ — пользователь увидит понятную страницу
+    // ошибки, а не «пустой» 500. Деталь уходит в лог сервера.
+    $cfg = np_boot();
+    $page = $_GET['p'] ?? 'dashboard';
+    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
     switch ($page) {
         case 'upload':        $method === 'POST' ? act_upload($cfg) : view_upload($cfg, $h); break;
         case 'profile':       view_profile($cfg, $h); break;
@@ -34,6 +38,7 @@ try {
     }
 } catch (Throwable $e) {
     http_response_code(500);
+    error_log('NeuroPro 500: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
     layout('Ошибка', '<div class="msg bad">' . $h($e->getMessage()) . '</div>', $h);
 }
 
@@ -281,7 +286,7 @@ function act_interpret(array $cfg): void {
 }
 
 function act_email(array $cfg): void {
-    require_once __DIR__ . '/../lib/mailer.php';
+    require_once __DIR__ . '/../../lib/mailer.php';
     $it = Db::one('SELECT * FROM interpretations WHERE id=?', [(int)($_GET['interp'] ?? 0)]);
     if (!$it) throw new RuntimeException('Интерпретация не найдена');
     $p = profile_row((int)$it['profile_id']);
