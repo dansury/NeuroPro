@@ -150,11 +150,39 @@ if ($src === null) {
 $keep = array_values(array_unique(array_merge(ALWAYS_KEEP, $config['keep_files'])));
 term("copying into {$target} (preserving: " . implode(', ', $keep) . ")");
 $copied = 0;
-copyTree($src, $target, $keep, $copied);
+$failed = [];
+copyTree($src, $target, $keep, $copied, $failed);
 cleanup($tmp);
 
 term("copied {$copied} files");
-print_finish_banner($startTs, $startStr, $tz, true, $copied);
+
+if ($failed) {
+    $n = count($failed);
+    term("error: {$n} file(s) could NOT be written:");
+    foreach (array_slice($failed, 0, 20) as $rel) {
+        term("  - {$rel}");
+    }
+    if ($n > 20) {
+        term("  ... and " . ($n - 20) . " more");
+    }
+    term("hint: the web server user cannot overwrite these files.");
+    term("  check ownership/permissions of {$target} and its contents");
+    term("  (files owned by another user, or read-only dirs, block the copy)");
+}
+
+// Drop the PHP opcode cache so updated .php files take effect on the next
+// request — otherwise opcache.validate_timestamps=0 keeps serving stale code.
+if (function_exists('opcache_reset')) {
+    if (@opcache_reset()) {
+        term("opcache reset");
+    } else {
+        term("opcache reset skipped (disabled, or restrict_api blocks this path)");
+    }
+} else {
+    term("opcache not available — nothing to reset");
+}
+
+print_finish_banner($startTs, $startStr, $tz, $failed === [], $copied);
 end_output();
 exit;
 
@@ -296,8 +324,11 @@ function download(string $url, string $dest, array $extraHeaders = []): array {
     return [$size, $size > 0 ? '' : 'empty file'];
 }
 
-function copyTree(string $from, string $to, array $keepTopLevel, int &$copied): void {
-    if (!is_dir($to) && !mkdir($to, 0755, true) && !is_dir($to)) return;
+function copyTree(string $from, string $to, array $keepTopLevel, int &$copied, array &$failed): void {
+    if (!is_dir($to) && !mkdir($to, 0755, true) && !is_dir($to)) {
+        $failed[] = $to . '/  (cannot create directory)';
+        return;
+    }
     foreach (new DirectoryIterator($from) as $f) {
         if ($f->isDot()) continue;
         $name = $f->getFilename();
@@ -305,12 +336,28 @@ function copyTree(string $from, string $to, array $keepTopLevel, int &$copied): 
         $s = $f->getPathname();
         $d = $to . '/' . $name;
         if ($f->isDir()) {
-            copyTree($s, $d, [], $copied);
+            copyTree($s, $d, [], $copied, $failed);
         } else {
-            @copy($s, $d);
-            $copied++;
+            if (copyFile($s, $d)) {
+                $copied++;
+            } else {
+                $failed[] = $d;
+            }
         }
     }
+}
+
+// Copy a single file, returning whether the destination ended up updated.
+// Handles the common shared-hosting case where the existing target file is
+// read-only or owned such that a plain copy() silently fails.
+function copyFile(string $src, string $dest): bool {
+    if (@copy($src, $dest)) return true;
+    if (is_file($dest)) {
+        @chmod($dest, 0644);
+        if (@copy($src, $dest)) return true;
+        if (@unlink($dest) && @copy($src, $dest)) return true;
+    }
+    return false;
 }
 
 function cleanup(string $dir): void {
