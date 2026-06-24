@@ -1,0 +1,33 @@
+# NeuroPro — Apache (2.4+) конфигурация веб-корня.
+# DocumentRoot должен указывать на эту папку (app/public).
+#
+# Лечит типичный 403 на «/»: без DirectoryIndex с index.php Apache пытается
+# отдать листинг каталога и отвечает Forbidden. Здесь же явно разрешаем доступ.
+
+# Стартовый файл — лендинг index.php (и для /app/ тоже index.php).
+DirectoryIndex index.php index.html
+
+# Доступ к каталогу разрешён, листинг — запрещён.
+<IfModule mod_authz_core.c>
+    Require all granted
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Allow from all
+</IfModule>
+
+Options -Indexes
+
+# UTF-8 по умолчанию для текстовых ответов.
+AddDefaultCharset UTF-8
+
+# Не отдавать наружу служебные файлы.
+<FilesMatch "(^\.|\.(env|sqlite|db|log)$)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
