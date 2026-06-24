@@ -150,10 +150,29 @@ if ($src === null) {
 $keep = array_values(array_unique(array_merge(ALWAYS_KEEP, $config['keep_files'])));
 term("copying into {$target} (preserving: " . implode(', ', $keep) . ")");
 $copied = 0;
-copyTree($src, $target, $keep, $copied);
+$failed = [];
+copyTree($src, $target, $keep, $copied, $failed);
 cleanup($tmp);
 
 term("copied {$copied} files");
+
+if ($failed) {
+    http_response_code(500);
+    term("error: failed to write " . count($failed) . " file(s) — files were NOT updated:");
+    foreach (array_slice($failed, 0, 10) as $f) {
+        term("  - " . ltrim(str_replace($target, '', $f), '/'));
+    }
+    if (count($failed) > 10) {
+        term("  ... and " . (count($failed) - 10) . " more");
+    }
+    term("hint: the web user cannot overwrite these paths. Check ownership/permissions");
+    term("  in {$target} (directories must be writable; existing files may be read-only");
+    term("  or owned by a different user than the one PHP runs as).");
+    print_finish_banner($startTs, $startStr, $tz, false, $copied);
+    end_output();
+    exit;
+}
+
 print_finish_banner($startTs, $startStr, $tz, true, $copied);
 end_output();
 exit;
@@ -296,8 +315,11 @@ function download(string $url, string $dest, array $extraHeaders = []): array {
     return [$size, $size > 0 ? '' : 'empty file'];
 }
 
-function copyTree(string $from, string $to, array $keepTopLevel, int &$copied): void {
-    if (!is_dir($to) && !mkdir($to, 0755, true) && !is_dir($to)) return;
+function copyTree(string $from, string $to, array $keepTopLevel, int &$copied, array &$failed): void {
+    if (!is_dir($to) && !mkdir($to, 0755, true) && !is_dir($to)) {
+        $failed[] = $to . ' (cannot create directory)';
+        return;
+    }
     foreach (new DirectoryIterator($from) as $f) {
         if ($f->isDot()) continue;
         $name = $f->getFilename();
@@ -305,10 +327,18 @@ function copyTree(string $from, string $to, array $keepTopLevel, int &$copied): 
         $s = $f->getPathname();
         $d = $to . '/' . $name;
         if ($f->isDir()) {
-            copyTree($s, $d, [], $copied);
+            copyTree($s, $d, [], $copied, $failed);
         } else {
-            @copy($s, $d);
-            $copied++;
+            // On shared hosting an existing file may be read-only or owned by a
+            // different user, so copy() can't overwrite it in place. The parent
+            // directory is usually writable, so drop the old file first, then
+            // copy a fresh one — and only count copies that actually succeed.
+            if (is_file($d)) @unlink($d);
+            if (@copy($s, $d)) {
+                $copied++;
+            } else {
+                $failed[] = $d;
+            }
         }
     }
 }
