@@ -200,7 +200,8 @@ function start_output(bool $plain): void {
     echo terminal_css();
     echo "</head><body><div class=\"term\"><div class=\"bar\">";
     echo "<span class=\"dot r\"></span><span class=\"dot y\"></span><span class=\"dot g\"></span>";
-    echo "<span class=\"title\">pull.php — " . htmlspecialchars(gethostname() ?: 'localhost', ENT_QUOTES, 'UTF-8') . "</span></div>";
+    echo "<span class=\"title\">pull.php — " . htmlspecialchars(gethostname() ?: 'localhost', ENT_QUOTES, 'UTF-8') . "</span>";
+    echo "<a class=\"home\" href=\"/\" title=\"Go to site root\">⌂ site root</a></div>";
     echo "<pre id=\"out\" class=\"out\"></pre></div>";
     echo terminal_js();
     echo str_repeat(' ', 1024); // flush kicker for some buffering proxies
@@ -440,7 +441,8 @@ function render_setup_form(array $values = [], array $errors = []): void {
     echo "</head><body>";
     echo "<div class=\"term\"><div class=\"bar\">";
     echo "<span class=\"dot r\"></span><span class=\"dot y\"></span><span class=\"dot g\"></span>";
-    echo "<span class=\"title\">pull.php — first-run setup</span></div>";
+    echo "<span class=\"title\">pull.php — first-run setup</span>";
+    echo "<a class=\"home\" href=\"/\" title=\"Go to site root\">⌂ site root</a></div>";
     echo "<div id=\"intro\" class=\"out\"></div>";
 
     // The intro text typed out by JS. data-intro carries the script.
@@ -569,7 +571,8 @@ function render_setup_done(array $config): void {
     echo terminal_css();
     echo "</head><body><div class=\"term\"><div class=\"bar\">";
     echo "<span class=\"dot r\"></span><span class=\"dot y\"></span><span class=\"dot g\"></span>";
-    echo "<span class=\"title\">pull.php — setup complete</span></div>";
+    echo "<span class=\"title\">pull.php — setup complete</span>";
+    echo "<a class=\"home\" href=\"/\" title=\"Go to site root\">⌂ site root</a></div>";
     echo "<pre class=\"out\">";
     echo "$ pull-config.php written\n";
     echo "  repo:     " . $h($config['repo']) . "\n";
@@ -604,6 +607,9 @@ html,body{margin:0;padding:0;background:var(--bg2);color:var(--fg);
 .dot{width:12px;height:12px;border-radius:50%}
 .dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
 .bar .title{margin-left:10px;color:#cfcfcf;font-size:12px;letter-spacing:.2px}
+.bar .home{margin-left:auto;color:var(--accent);text-decoration:none;font-size:12px;
+  border:1px solid var(--accent);border-radius:4px;padding:2px 8px;white-space:nowrap}
+.bar .home:hover{background:var(--accent);color:#1a1a1a}
 .out{margin:0;padding:18px 20px;white-space:pre-wrap;word-break:break-word;
   color:var(--fg);min-height:60px}
 .out .line{display:block;white-space:pre-wrap}
