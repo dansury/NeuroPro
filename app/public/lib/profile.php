@@ -14,9 +14,39 @@ require_once __DIR__ . '/excel.php';
 final class Profile {
     /** Known test types → prompt key. Matched against the methodic string. */
     public const TEST_TYPES = [
-        'СМУ'  => ['key' => 'smu', 'label' => 'Структура мотивации участия (СМУ)'],
-        'LSI'  => ['key' => 'lsi', 'label' => 'Индекс жизненного стиля (ИЖС/LSI)'],
-        'ИЖС'  => ['key' => 'lsi', 'label' => 'Индекс жизненного стиля (ИЖС/LSI)'],
+        'СМУ'         => ['key' => 'smu', 'label' => 'Структура мотивации участия (СМУ)'],
+        'LSI'         => ['key' => 'lsi', 'label' => 'Индекс жизненного стиля (ИЖС/LSI)'],
+        'ИЖС'         => ['key' => 'lsi', 'label' => 'Индекс жизненного стиля (ИЖС/LSI)'],
+        'Басса-Дарки' => ['key' => 'bd',  'label' => 'Опросник Басса-Дарки (агрессивность)'],
+        'Басса'       => ['key' => 'bd',  'label' => 'Опросник Басса-Дарки (агрессивность)'], // вариант написания без дефиса
+    ];
+
+    /** Заголовок диаграммы по типу теста (для страницы и отчёта). */
+    public const CHART_TITLES = [
+        'smu' => 'Структура мотивации',
+        'lsi' => 'Индекс жизненного стиля',
+        'bd'  => 'Профиль агрессивности',
+    ];
+
+    /**
+     * Басса-Дарки: максимум каждой шкалы = число её вопросов (шкалы НЕ сравнимы
+     * по сырым баллам между собой). Ключ — точная подпись шкалы из выгрузки.
+     */
+    public const BD_SCALE_MAX = [
+        'Физическая агрессия' => 10,
+        'Косвенная агрессия'  => 9,
+        'Раздражение'         => 11,
+        'Негативизм'          => 5,
+        'Обида'               => 8,
+        'Подозрительность'    => 10,
+        'Вербальная агрессия' => 13,
+        'Чувство вины'        => 9,
+    ];
+
+    /** Индексы Басса-Дарки — детерминированные суммы шкал + границы нормы. */
+    public const BD_INDICES = [
+        'Индекс агрессивности' => ['scales' => ['Физическая агрессия', 'Раздражение', 'Вербальная агрессия'], 'min' => 17.0, 'max' => 25.0, 'cap' => 34],
+        'Индекс враждебности'  => ['scales' => ['Обида', 'Подозрительность'], 'min' => 3.5, 'max' => 10.0, 'cap' => 18],
     ];
 
     /** Compact axis labels for the radar chart (full label → short), matching the
@@ -150,12 +180,46 @@ final class Profile {
         return '';
     }
 
-    /** СМУ uses a 0–10 scale; LSI is reported as a percentage (0–100). */
-    private static function scoreMax(array $scores, string $testKey): int {
+    /**
+     * СМУ uses a 0–10 scale; LSI is reported as a percentage (0–100);
+     * Басса-Дарки — raw scores, chart scaled to the longest scale (13).
+     */
+    public static function scoreMax(array $scores, string $testKey): int {
         if ($testKey === 'lsi') return 100;
+        if ($testKey === 'bd') return max(self::BD_SCALE_MAX);
         $max = 10;
         foreach ($scores as $s) { if ($s['score'] > $max) $max = (int) ceil($s['score']); }
         return $max <= 10 ? 10 : 100;
+    }
+
+    public static function chartTitle(string $testKey): string {
+        return self::CHART_TITLES[$testKey] ?? 'Профиль показателей';
+    }
+
+    /** Максимум конкретной шкалы, если у теста он пошкальный (Басса-Дарки). */
+    public static function scaleMax(string $testKey, string $label): ?int {
+        return $testKey === 'bd' ? (self::BD_SCALE_MAX[trim($label)] ?? null) : null;
+    }
+
+    /**
+     * Индексы Басса-Дарки, посчитанные из баллов Excel (Конституция, принцип I:
+     * математика, не нейросеть). Индекс пропускается, если какой-то из его шкал
+     * нет в данных — ничего не выдумываем (принцип II).
+     */
+    public static function bdIndices(array $scores): array {
+        $byLabel = [];
+        foreach ($scores as $s) $byLabel[trim((string) $s['label'])] = (float) $s['score'];
+        $out = [];
+        foreach (self::BD_INDICES as $name => $ix) {
+            $sum = 0.0; $have = 0;
+            foreach ($ix['scales'] as $l) {
+                if (isset($byLabel[$l])) { $sum += $byLabel[$l]; $have++; }
+            }
+            if ($have !== count($ix['scales'])) continue;
+            $verdict = $sum < $ix['min'] ? 'ниже нормы' : ($sum > $ix['max'] ? 'выше нормы' : 'в норме');
+            $out[$name] = ['value' => $sum, 'min' => $ix['min'], 'max' => $ix['max'], 'cap' => $ix['cap'], 'verdict' => $verdict];
+        }
+        return $out;
     }
 
     private static function cellStr($v): string {

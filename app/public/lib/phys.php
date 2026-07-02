@@ -57,12 +57,15 @@ final class Phys {
         return $best;
     }
 
-    /** First signed decimal number on a line (the Зна value). */
+    /** First signed number on a line (the Зна value — первый числовой столбец). */
     private static function firstSigned(string $line): ?float {
+        // Вырезаем p-значение, иначе «p>0.05» перехватывается как Зна, когда
+        // само Зна целое (формат Басса-Дарки: «Косвенная агрессия 6 6 p>0.05»).
+        $line = (string) preg_replace('/p\s*[=<>≤≥]?\s*[01][.,]\d+/ui', ' ', $line);
         if (preg_match('/[-−]?\d+[.,]\d+/u', $line, $m)) {
             return (float) str_replace([',', '−'], ['.', '-'], $m[0]);
         }
-        if (preg_match('/[-−]\s*\d+/u', $line, $m)) {
+        if (preg_match('/[-−]\s*\d+|\d+/u', $line, $m)) {
             return (float) str_replace(['−', ' '], ['-', ''], $m[0]);
         }
         return null;

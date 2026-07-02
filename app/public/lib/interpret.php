@@ -8,6 +8,7 @@
 require_once __DIR__ . '/llm.php';
 require_once __DIR__ . '/prompts.php';
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/profile.php';
 
 final class Interpret {
     /**
@@ -33,9 +34,20 @@ final class Interpret {
         $lines[] = 'Методика: ' . $profile['methodic'];
         $lines[] = 'Дата: ' . $profile['date'];
         $lines[] = '';
-        $lines[] = 'КОГНИТИВНЫЕ БАЛЛЫ (из Excel, шкала 0–' . ($profile['score_max'] ?? 10) . '):';
+        $testKey = (string) ($profile['test_key'] ?? '');
+        $lines[] = $testKey === 'bd'
+            ? 'КОГНИТИВНЫЕ БАЛЛЫ (из Excel; у каждой шкалы свой максимум — число её вопросов):'
+            : 'КОГНИТИВНЫЕ БАЛЛЫ (из Excel, шкала 0–' . ($profile['score_max'] ?? 10) . '):';
         foreach ($profile['scores'] as $s) {
-            $lines[] = sprintf('%d. %s — %s', $s['n'], $s['label'], rtrim(rtrim(number_format((float) $s['score'], 1, '.', ''), '0'), '.'));
+            $line = sprintf('%d. %s — %s', $s['n'], $s['label'], self::num((float) $s['score']));
+            $scaleMax = Profile::scaleMax($testKey, (string) $s['label']);
+            if ($scaleMax !== null) $line .= ' из ' . $scaleMax;
+            $lines[] = $line;
+        }
+        // Индексы Басса-Дарки считаем сами (математика), чтобы нейросеть их не выводила.
+        foreach ($testKey === 'bd' ? Profile::bdIndices($profile['scores']) : [] as $name => $ix) {
+            $lines[] = sprintf('%s = %s из %d (норма %s–%s) — %s.',
+                $name, self::num($ix['value']), $ix['cap'], self::num($ix['min']), self::num($ix['max']), $ix['verdict']);
         }
         $lines[] = '';
         if (trim($physOcrText) !== '') {
@@ -47,6 +59,11 @@ final class Interpret {
         $lines[] = '';
         $lines[] = 'Сформируй интерпретацию строго по инструкции из системного промпта.';
         return implode("\n", $lines);
+    }
+
+    /** Compact number: 9.0 → "9", 3.5 → "3.5". */
+    private static function num(float $v): string {
+        return rtrim(rtrim(number_format($v, 1, '.', ''), '0'), '.');
     }
 
     /** Persist an interpretation against the exact version used. */
