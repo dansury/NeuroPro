@@ -33,6 +33,10 @@ function np_boot(): array {
     return $cfg;
 }
 
+/** Комментарии-маркеры автосидируемых версий (по ним же проверяется идемпотентность). */
+const NP_PROMPT_V1_COMMENT = 'Импортировано из исходного промпта';
+const NP_PROMPT_V2_COMMENT = 'v2: адаптация под недорогие модели (DeepSeek и др.) — вход описан как распознанный текст скриншота';
+
 /** Seed СМУ + LSI + Басса-Дарки prompt families from the bundled source prompt files. */
 function np_seed_prompts(): void {
     // Локально Sources лежит в корне репозитория (три уровня над lib); на
@@ -48,5 +52,31 @@ function np_seed_prompts(): void {
         $path = $sources . '/' . $file;
         $body = is_file($path) ? (string) file_get_contents($path) : ('Промпт для ' . $name);
         Prompts::seed($key, $name, trim($body), 'deepseek-r1', 'yandex');
+    }
+    np_seed_prompts_v2();
+}
+
+/**
+ * Досидирует версии v2 — промпты, адаптированные под недорогие модели.
+ * Тексты лежат в lib/prompts/*.php (внутри веб-корня, деплоятся через pull.php).
+ * v2 становится активной, только если оператор ещё не трогал семейство
+ * (активна нетронутая автосидированная v1) — ручной выбор версии не перебиваем.
+ */
+function np_seed_prompts_v2(): void {
+    $v2 = ['smu' => 'smu_v2.php', 'lsi' => 'lsi_v2.php', 'bd' => 'bd_v2.php'];
+    foreach ($v2 as $key => $file) {
+        $fam = Prompts::family($key);
+        if (!$fam) continue;
+        $promptId = (int) $fam['id'];
+        if (Db::one('SELECT id FROM prompt_versions WHERE prompt_id = ? AND comment = ?', [$promptId, NP_PROMPT_V2_COMMENT])) continue;
+        $path = __DIR__ . '/prompts/' . $file;
+        if (!is_file($path)) continue;
+        $body = trim((string) require $path);
+        if ($body === '') continue;
+        $versionId = Prompts::addVersion($promptId, $body, 'deepseek-v3', 'yandex', NP_PROMPT_V2_COMMENT);
+        $active = $fam['active_version_id'] ? Prompts::version((int) $fam['active_version_id']) : null;
+        if ($active === null || ((int) $active['version_no'] === 1 && ($active['comment'] ?? '') === NP_PROMPT_V1_COMMENT)) {
+            Prompts::setActive($promptId, $versionId);
+        }
     }
 }
