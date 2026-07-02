@@ -88,6 +88,7 @@ app/
       ocr (в llm.php)   # LLM::ocrImage() — Yandex Vision OCR скриншота
       llm.php           # Провайдеры OpenRouter + Yandex, fallback, OCR
       prompts.php       # Семейства промптов + версии (правила удаления/активации)
+      prompts/          # Тексты автосидируемых версий промптов (v2 — под недорогие модели)
       interpret.php     # Сборка запроса + вызов нейросети + сохранение интерпретации
       report.php        # Брендированный отчёт (Verdana) → HTML/PDF/письмо
       mailer.php        # SMTP-отправка
