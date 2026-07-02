@@ -16,6 +16,27 @@ if (!function_exists('cfg_env')) {
     }
 }
 
+// Каталог данных (SQLite, логи, загрузки, watch-папка). Приоритет:
+//   1. ENV NP_DATA_DIR
+//   2. каталог data НАД веб-корнем — не отдаётся веб-сервером
+//      (локально это app/data, на хостинге — рядом с корнем сайта)
+//   3. data внутри веб-корня — крайний случай, когда родительский каталог
+//      недоступен на запись
+if (!function_exists('cfg_data_root')) {
+    function cfg_data_root(): string {
+        static $dir = null;
+        if ($dir !== null) return $dir;
+        $env = cfg_env('NP_DATA_DIR');
+        if ($env !== null) return $dir = rtrim($env, '/');
+        $webroot = dirname(__DIR__); // lib лежит в веб-корне
+        $above   = dirname($webroot) . '/data';
+        if (is_dir($above) || (is_writable(dirname($above)) && @mkdir($above, 0775, true))) {
+            return $dir = $above;
+        }
+        return $dir = $webroot . '/data';
+    }
+}
+
 // Operator-editable keys: only these are overlaid from the `settings` table.
 if (!function_exists('cfg_settings_whitelist')) {
     function cfg_settings_whitelist(): array {
@@ -79,20 +100,20 @@ $config = [
     'SMTP_FROM_NAME'        => cfg_env('SMTP_FROM_NAME', '4neuropro'),
 
     /* ── Storage ── */
-    'DB_PATH'               => cfg_env('DB_PATH', dirname(__DIR__) . '/data/app.db'),
-    'LOG_DIR'               => cfg_env('LOG_DIR', dirname(__DIR__) . '/data/logs'),
+    'DB_PATH'               => cfg_env('DB_PATH', cfg_data_root() . '/app.db'),
+    'LOG_DIR'               => cfg_env('LOG_DIR', cfg_data_root() . '/logs'),
     'PROMPT_VERSION'        => 'v1.0',
 
     /* ── NeuroPro service ── */
     // Folder watched for new Эгоскоп .xls exports (auto-ingest → await screenshot).
-    'WATCH_DIR'             => cfg_env('WATCH_DIR', dirname(__DIR__) . '/data/incoming'),
+    'WATCH_DIR'             => cfg_env('WATCH_DIR', cfg_data_root() . '/incoming'),
     // Public URL of the analysis app. The watch-folder daemon opens it in the
     // operator's browser when a new file is ingested. Empty disables auto-open.
     'APP_URL'               => cfg_env('APP_URL', 'http://neuropro.skywood.club/app/'),
-    'UPLOAD_DIR'            => cfg_env('UPLOAD_DIR', dirname(__DIR__) . '/data/uploads'),
+    'UPLOAD_DIR'            => cfg_env('UPLOAD_DIR', cfg_data_root() . '/uploads'),
     'BRAND_NAME'            => cfg_env('BRAND_NAME', 'Центр корпоративной психологии «НейроПро»'),
     'BRAND_PHONE'          => cfg_env('BRAND_PHONE', '8-917-859-60-79'),
-    'BRAND_LOGO'           => cfg_env('BRAND_LOGO', dirname(__DIR__) . '/public/assets/logo.png'),
+    'BRAND_LOGO'           => cfg_env('BRAND_LOGO', dirname(__DIR__) . '/assets/logo.png'),
     'YANDEX_OCR_IMAGE_MODEL' => cfg_env('YANDEX_OCR_IMAGE_MODEL', 'page'),
 
     /* ── Available models (chat + OCR). price_in/price_out: RUB per 1k tokens (approx).

@@ -35,7 +35,9 @@ function np_boot(): array {
 
 /** Seed СМУ + LSI prompt families from the bundled source prompt files. */
 function np_seed_prompts(): void {
-    $sources = dirname(__DIR__, 2) . '/Sources';
+    // Локально Sources лежит в корне репозитория (три уровня над lib); на
+    // хостинге каталога нет — тогда сидируется заглушка, промпт правится в UI.
+    $sources = dirname(__DIR__, 3) . '/Sources';
     $seed = [
         'smu' => ['SMU PROMPT.txt', 'Интерпретация СМУ (Структура мотивации участия)'],
         'lsi' => ['LSI PROMPT.txt', 'Интерпретация ИЖС/LSI (Индекс жизненного стиля)'],
