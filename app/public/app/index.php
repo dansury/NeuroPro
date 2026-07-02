@@ -327,14 +327,12 @@ function profile_row(int $id): array {
 }
 
 function profile_decode(array $p): array {
+    $scores = json_decode($p['scores_json'], true) ?: [];
     return [
         'name' => $p['name'], 'age' => $p['age'], 'sex' => $p['sex'], 'date' => $p['test_date'],
         'methodic' => $p['methodic'], 'test_key' => $p['test_key'],
-        'scores' => json_decode($p['scores_json'], true) ?: [],
-        'score_max' => (function () use ($p) {
-            $s = json_decode($p['scores_json'], true) ?: [];
-            return ($p['test_key'] === 'lsi') ? 100 : 10;
-        })(),
+        'scores' => $scores,
+        'score_max' => Profile::scoreMax($scores, (string) $p['test_key']),
     ];
 }
 
@@ -369,13 +367,13 @@ function profile_from_text(string $text, string $methodic): array {
     foreach (Profile::TEST_TYPES as $needle => $info) if (mb_strpos($mu, mb_strtoupper($needle)) !== false) { $key = $info['key']; break; }
     return ['name' => 'Без имени', 'age' => '', 'sex' => '', 'date' => date('d m Y H:i'),
             'methodic' => $methodic ?: 'Не указана', 'test_key' => $key, 'scores' => $scores,
-            'score_max' => $key === 'lsi' ? 100 : 10];
+            'score_max' => Profile::scoreMax($scores, $key)];
 }
 
 function cognitive_svg(array $prof, ?array $phys = null): string {
     $labels = array_map(fn ($s) => Profile::shortLabel($s['label']), $prof['scores']);
     $cog = array_map(fn ($s) => (float) $s['score'], $prof['scores']);
-    return Chart::svg($labels, $cog, (int)($prof['score_max'] ?? 10), $phys, ['title' => 'Структура мотивации', 'size' => 560]);
+    return Chart::svg($labels, $cog, (int)($prof['score_max'] ?? 10), $phys, ['title' => Profile::chartTitle((string)($prof['test_key'] ?? '')), 'size' => 560]);
 }
 
 function redirect(string $to): void { header('Location: ' . $to); exit; }

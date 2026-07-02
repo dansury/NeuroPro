@@ -2,7 +2,7 @@
 /**
  * Mathematical radar ("spider") chart generator — pure geometry, no AI.
  *
- * Renders the 12 (СМУ) or 8 (LSI) cognitive parameters as a polygon and, when
+ * Renders the cognitive parameters (12 for СМУ, 8 for LSI/Басса-Дарки) as a polygon and, when
  * physiological data from the OCR'd "смысло-эмоциональная значимость" screenshot
  * is supplied, overlays it as a second translucent polygon on the same axes —
  * exactly the "наложить физиологические на когнитивные" requirement.
@@ -26,7 +26,7 @@ final class Chart {
     /**
      * @param array  $labels      axis labels (clockwise from top)
      * @param array  $cognitive   numeric values aligned with $labels
-     * @param int    $max         scale maximum (10 for СМУ, 100 for LSI)
+     * @param int    $max         scale maximum (10 for СМУ, 100 for LSI, 13 for Басса-Дарки)
      * @param array|null $phys     optional physiological values aligned with
      *                             $labels (signed "Зна"); null entries skipped
      * @param array  $opts        size, title, rings, phys_max
@@ -36,7 +36,7 @@ final class Chart {
         if ($n < 3) return '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>';
 
         $size  = (int) ($opts['size'] ?? 560);
-        $rings = (int) ($opts['rings'] ?? ($max <= 10 ? $max : 10));
+        $rings = (int) ($opts['rings'] ?? ($max <= 20 ? $max : 10)); // кольцо на каждый балл, пока шкала короткая
         $title = (string) ($opts['title'] ?? '');
         $cx = $size / 2;
         $cy = $size / 2 + 6;

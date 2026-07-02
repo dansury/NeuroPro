@@ -28,7 +28,7 @@ final class Report {
         $cog    = array_map(static fn ($s) => (float) $s['score'], $profile['scores']);
         $phys   = $opts['phys'] ?? null;
         $svg    = Chart::svg($labels, $cog, (int) ($profile['score_max'] ?? 10), $phys, [
-            'title' => 'Структура мотивации',
+            'title' => Profile::chartTitle((string) ($profile['test_key'] ?? '')),
             'size'  => 600,
         ]);
 
@@ -97,8 +97,9 @@ final class Report {
     private static function scoresTable(array $profile, callable $h): string {
         $scores = $profile['scores'];
         if (!$scores) return '';
-        $isSmu = ($profile['test_key'] ?? '') === 'smu' && count($scores) === 12;
-        $unit = ($profile['score_max'] ?? 10) > 10 ? '%' : 'Баллы';
+        $testKey = (string) ($profile['test_key'] ?? '');
+        $isSmu = $testKey === 'smu' && count($scores) === 12;
+        $unit = $testKey === 'lsi' ? '%' : 'Баллы';
 
         ob_start(); ?>
 <table class="scores">
@@ -124,8 +125,21 @@ final class Report {
   Мотивация достижения: <?= $h((string) round($ach)) ?>.<br>
   Мотивация отношения: <?= $h((string) round($rel)) ?>.
 </div>
+<?php endif; ?>
+<?php if ($testKey === 'bd' && ($indices = Profile::bdIndices($scores))): ?>
+<div class="totals">
+  Заключение:<br>
+  <?php foreach ($indices as $name => $ix): ?>
+  <?= $h($name) ?> = <?= $h(self::num($ix['value'])) ?> из <?= (int) $ix['cap'] ?> (норма <?= $h(self::num($ix['min'])) ?>–<?= $h(self::num($ix['max'])) ?>) — <?= $h($ix['verdict']) ?>.<br>
+  <?php endforeach; ?>
+</div>
 <?php endif;
         return ob_get_clean();
+    }
+
+    /** Compact number: 9.0 → "9", 3.5 → "3.5". */
+    private static function num(float $v): string {
+        return rtrim(rtrim(number_format($v, 1, '.', ''), '0'), '.');
     }
 
     private static function logoDataUri(string $path): string {
