@@ -15,7 +15,7 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../lib/bootstrap.php';
+require_once __DIR__ . '/../public/lib/bootstrap.php';
 
 // На Windows консоль по умолчанию в cp866 — переключаем ввод/вывод PHP на UTF-8,
 // чтобы кириллица в логах не превращалась в «кракозябры».

@@ -55,12 +55,12 @@
 ревью каждой задачи:
 
 1. **Диаграмма — математика, не нейросеть.** Любой расчёт/геометрия диаграммы —
-   детерминированный код (`app/lib/chart.php`). Нейросети используются **только**
+   детерминированный код (`app/public/lib/chart.php`). Нейросети используются **только**
    для текстовой интерпретации и OCR.
 2. **Никаких выдуманных данных.** Числа берутся из Excel и OCR; если данных нет —
    честно отмечаем прочерком (это же требование зашито в промпты).
 3. **Чистый PHP, без Composer.** Только `ext-curl`, `ext-gd`, `ext-pdo_sqlite`,
-   `ext-zip`, `ext-mbstring`. Переиспользуем библиотеку из `app/lib/`.
+   `ext-zip`, `ext-mbstring`. Переиспользуем библиотеку из `app/public/lib/`.
 4. **Секреты — только через ENV / `setup.php`.** В коде секретов нет.
 5. **Версионируемость промптов и интерпретаций.** Любая интерпретация привязана к
    конкретной версии промпта; история не теряется.
@@ -69,24 +69,30 @@
 
 ## Архитектура
 
+> **Деплой:** прод обновляется через `https://<host>/pull.php`, который зеркалит
+> в веб-корень хостинга **только** содержимое `app/public` (см. `pull-config.php`,
+> `subdir = /app/public`). Поэтому библиотека живёт в `app/public/lib/` — внутри
+> деплоящегося веб-корня. Каталог данных создаётся **над** веб-корнем
+> (`cfg_data_root()` в `config.php`): локально это `app/data/`.
+
 ```
 app/
-  lib/
-    config.php        # ENV + overlay настроек из таблицы settings
-    db.php            # SQLite-схема: profiles, prompts, prompt_versions, interpretations
-    excel.php         # Чтение .xls (OLE2+BIFF8) / .xlsx / .csv — чистый PHP
-    profile.php       # Грид Excel → структурный профиль (метаданные, 12/8 баллов, тип теста)
-    chart.php         # МАТЕМАТИЧЕСКАЯ радар-диаграмма (SVG): когниция ⊕ физиология
-    phys.php          # Разбор OCR-текста таблицы значимости → выровненные Зна по осям
-    ocr (в llm.php)   # LLM::ocrImage() — Yandex Vision OCR скриншота
-    llm.php           # Провайдеры OpenRouter + Yandex, fallback, OCR
-    prompts.php       # Семейства промптов + версии (правила удаления/активации)
-    interpret.php     # Сборка запроса + вызов нейросети + сохранение интерпретации
-    report.php        # Брендированный отчёт (Verdana) → HTML/PDF/письмо
-    mailer.php        # SMTP-отправка
-    settings_store.php# key/value стор настроек
-    bootstrap.php     # Загрузка config, init DB+LLM, сидинг промптов
-  public/
+  public/             # ← веб-корень; ровно это зеркалится на прод через pull.php
+    lib/
+      config.php        # ENV + overlay настроек из таблицы settings
+      db.php            # SQLite-схема: profiles, prompts, prompt_versions, interpretations
+      excel.php         # Чтение .xls (OLE2+BIFF8) / .xlsx / .csv — чистый PHP
+      profile.php       # Грид Excel → структурный профиль (метаданные, 12/8 баллов, тип теста)
+      chart.php         # МАТЕМАТИЧЕСКАЯ радар-диаграмма (SVG): когниция ⊕ физиология
+      phys.php          # Разбор OCR-текста таблицы значимости → выровненные Зна по осям
+      ocr (в llm.php)   # LLM::ocrImage() — Yandex Vision OCR скриншота
+      llm.php           # Провайдеры OpenRouter + Yandex, fallback, OCR
+      prompts.php       # Семейства промптов + версии (правила удаления/активации)
+      interpret.php     # Сборка запроса + вызов нейросети + сохранение интерпретации
+      report.php        # Брендированный отчёт (Verdana) → HTML/PDF/письмо
+      mailer.php        # SMTP-отправка
+      settings_store.php# key/value стор настроек
+      bootstrap.php     # Загрузка config, init DB+LLM, сидинг промптов
     index.php         # Лендинг «/» (кнопка → /app/)
     app/index.php     # Фронт-контроллер приложения анализа «/app/» (роуты ?p=...)
     setup.php         # Настройки провайдера/модели/OCR/SMTP (пароль ADMIN_PASSWORD)
@@ -94,7 +100,7 @@ app/
   bin/
     watch.php         # Демон слежения за папкой: новый .xls → профиль «ожидает скриншот»;
                       # открывает APP_URL (/app/) в браузере оператора
-  data/               # SQLite + логи + загрузки + incoming (gitignored)
+  data/               # SQLite + логи + загрузки + incoming (gitignored; на проде — над веб-корнем)
 Sources/              # Исходники заказчика: промпты, образец .xls/.pdf, лого, референс
 specs/001-neuropro-service/   # Spec Kit: спека, план, задачи этой фичи
 ```
@@ -126,7 +132,7 @@ php -S 127.0.0.1:8080 -t app/public
 php app/bin/watch.php 5         # интервал 5 c, папка = WATCH_DIR
 
 # Линт
-php -l app/lib/<файл>.php
+php -l app/public/lib/<файл>.php
 
 # Конфигурация секретов — через ENV (см. app/.env.example) или setup.php
 ```

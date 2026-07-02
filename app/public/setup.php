@@ -15,10 +15,10 @@ ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 header('X-Robots-Tag: noindex, nofollow', true);
 
-require_once __DIR__ . '/settings_store.php';
-require_once __DIR__ . '/mailer.php';
+require_once __DIR__ . '/lib/settings_store.php';
+require_once __DIR__ . '/lib/mailer.php';
 
-$cfg   = require __DIR__ . '/config.php';
+$cfg   = require __DIR__ . '/lib/config.php';
 $store = new SettingsStore($cfg['DB_PATH']);
 
 session_start();
@@ -76,7 +76,7 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if ($method === 'POST') {
     if (isset($_POST['smtp_test'])) {
         // Test letter via the CURRENT saved settings (re-read overlay).
-        $cfg_live = require __DIR__ . '/config.php';
+        $cfg_live = require __DIR__ . '/lib/config.php';
         $test_to = trim((string) ($_POST['smtp_test_to'] ?? '')) ?: (string) ($cfg_live['ADMIN_EMAIL'] ?? '');
         try {
             Mailer::sendTest($cfg_live, $test_to);
@@ -109,7 +109,7 @@ if ($method === 'POST') {
 }
 
 // Re-load config so freshly-saved overlay values render in the "current" hints.
-$cfg = require __DIR__ . '/config.php';
+$cfg = require __DIR__ . '/lib/config.php';
 $current = $store->allSettings();
 $mask = static fn (?string $v) => $v ? str_repeat('•', max(4, min(strlen((string) $v), 16))) : '';
 $mask_key = static function (?string $v): string {
