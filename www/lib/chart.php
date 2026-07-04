@@ -7,20 +7,28 @@
  * is supplied, overlays it as a second translucent polygon on the same axes —
  * exactly the "наложить физиологические на когнитивные" requirement.
  *
+ * Физиология — это столбец «Знач.» (визуальная шкала Эгоскопа): 0 = медиана
+ * (середина радиуса), >0 — наружу, <0 — к центру. Оси с p<0.05 выделяются
+ * жирной точкой и жирной подписью значения. Оси без данных честно пропускаются
+ * (никаких точек-заглушек — Конституция, принцип II).
+ *
  * Output is a standalone SVG string (crisp at any size, embeds straight into the
- * web page and the branded PDF). Font is Verdana throughout.
+ * web page and the branded PDF). Font is Verdana throughout. Сетка — круговая,
+ * по визуальному референсу (Sources/diagram_reference.jpg).
  */
 
 final class Chart {
     // Brand palette derived from the NeuroPro logo (crimson) + reference teal.
     private const COG_STROKE = '#b3203b';   // cognitive polygon (crimson)
     private const COG_FILL   = '#b3203b';
-    private const COG_OPACITY = '0.14';
+    private const COG_OPACITY = '0.16';
     private const PHYS_STROKE = '#1f9da8';  // physiological polygon (teal)
     private const PHYS_FILL  = '#1f9da8';
-    private const PHYS_OPACITY = '0.28';
-    private const GRID       = '#d7dde3';
-    private const AXIS       = '#b9c2cc';
+    private const PHYS_OPACITY = '0.30';
+    private const PHYS_TEXT  = '#127680';   // подписи Знач. у точек
+    private const GRID       = '#e2e7ec';
+    private const GRID_OUTER = '#c9d2da';
+    private const AXIS       = '#d7dde3';
     private const TEXT       = '#2a3138';
 
     /**
@@ -28,8 +36,8 @@ final class Chart {
      * @param array  $cognitive   numeric values aligned with $labels
      * @param int    $max         scale maximum (10 for СМУ, 100 for LSI, 13 for Басса-Дарки)
      * @param array|null $phys     optional physiological values aligned with
-     *                             $labels (signed "Зна"); null entries skipped
-     * @param array  $opts        size, title, rings, phys_max
+     *                             $labels (signed "Знач."); null entries skipped
+     * @param array  $opts        size, title, rings, phys_max, phys_sig (bool[] — p<0.05)
      */
     public static function svg(array $labels, array $cognitive, int $max = 10, ?array $phys = null, array $opts = []): string {
         $n = count($labels);
@@ -38,8 +46,9 @@ final class Chart {
         $size  = (int) ($opts['size'] ?? 560);
         $rings = (int) ($opts['rings'] ?? ($max <= 20 ? $max : 10)); // кольцо на каждый балл, пока шкала короткая
         $title = (string) ($opts['title'] ?? '');
+        $physSig = $opts['phys_sig'] ?? [];
         $cx = $size / 2;
-        $cy = $size / 2 + 6;
+        $cy = $size / 2 + 2;
         $R  = $size * 0.30;            // outer radius (room for labels)
         $labelR = $R + $size * 0.055;
 
@@ -57,14 +66,16 @@ final class Chart {
             $svg[] = '<text x="' . $cx . '" y="26" text-anchor="middle" font-size="16" font-weight="bold" fill="' . self::TEXT . '">' . self::esc($title) . '</text>';
         }
 
-        // Concentric grid rings (polygonal) + ring scale labels.
+        // Круговая сетка (по референсу): заливка-подложка + тонкие концентрические
+        // кольца, внешнее кольцо акцентировано.
+        $svg[] = '<circle cx="' . $cx . '" cy="' . $cy . '" r="' . round($R, 1) . '" fill="#fbfcfd" stroke="none"/>';
         for ($g = 1; $g <= $rings; $g++) {
             $frac = $g / $rings;
-            $poly = [];
-            for ($i = 0; $i < $n; $i++) { [$x, $y] = $pt($i, $frac); $poly[] = round($x, 1) . ',' . round($y, 1); }
-            $svg[] = '<polygon points="' . implode(' ', $poly) . '" fill="none" stroke="' . self::GRID . '" stroke-width="1"/>';
+            $isOuter = $g === $rings;
+            $svg[] = '<circle cx="' . $cx . '" cy="' . $cy . '" r="' . round($R * $frac, 1) . '" fill="none" stroke="'
+                   . ($isOuter ? self::GRID_OUTER : self::GRID) . '" stroke-width="' . ($isOuter ? '1.6' : '1') . '"/>';
             $scaleVal = round($max * $frac);
-            $svg[] = '<text x="' . round($cx + 3) . '" y="' . round($cy - $R * $frac + 3) . '" font-size="9" fill="#9aa4ad">' . $scaleVal . '</text>';
+            $svg[] = '<text x="' . round($cx + 4) . '" y="' . round($cy - $R * $frac + 3.5) . '" font-size="9" fill="#9aa4ad">' . $scaleVal . '</text>';
         }
 
         // Axes + outer labels.
@@ -79,22 +90,34 @@ final class Chart {
         }
 
         // Physiological overlay first (drawn under cognitive so the line reads on top).
+        $physPts = [];   // [axisIdx => [x, y, value, significant]]
         if ($phys !== null) {
             $pmax = (float) ($opts['phys_max'] ?? self::absMax($phys));
             if ($pmax <= 0) $pmax = 1.0;
-            $poly = [];
             for ($i = 0; $i < $n; $i++) {
                 $v = $phys[$i] ?? null;
-                // Map signed Зна onto the radius: median (0) sits at mid-ring,
+                if ($v === null) continue; // нет данных — нет точки
+                // Map signed Знач. onto the radius: median (0) sits at mid-ring,
                 // right-of-median (>0, tension) reaches outward, left inward.
-                $frac = $v === null ? 0.5 : max(0.04, min(1.0, 0.5 + 0.5 * ($v / $pmax)));
+                $frac = max(0.04, min(1.0, 0.5 + 0.5 * ((float) $v / $pmax)));
                 [$x, $y] = $pt($i, $frac);
-                $poly[] = round($x, 1) . ',' . round($y, 1);
+                $physPts[$i] = [$x, $y, (float) $v, !empty($physSig[$i])];
             }
-            $svg[] = '<polygon points="' . implode(' ', $poly) . '" fill="' . self::PHYS_FILL . '" fill-opacity="' . self::PHYS_OPACITY . '" stroke="' . self::PHYS_STROKE . '" stroke-width="2"/>';
-            foreach (explode(' ', implode(' ', $poly)) as $pair) {
-                [$x, $y] = explode(',', $pair);
-                $svg[] = '<circle cx="' . $x . '" cy="' . $y . '" r="3.4" fill="' . self::PHYS_STROKE . '"/>';
+            if (count($physPts) >= 3) {
+                $poly = array_map(static fn ($p) => round($p[0], 1) . ',' . round($p[1], 1), $physPts);
+                $svg[] = '<polygon points="' . implode(' ', $poly) . '" fill="' . self::PHYS_FILL . '" fill-opacity="' . self::PHYS_OPACITY . '" stroke="' . self::PHYS_STROKE . '" stroke-width="2"/>';
+            }
+            foreach ($physPts as $i => [$x, $y, $v, $sig]) {
+                // Точка: при p<0.05 — заметно жирнее (крупнее + обводка).
+                $r = $sig ? 6.0 : 3.6;
+                $svg[] = '<circle cx="' . round($x, 1) . '" cy="' . round($y, 1) . '" r="' . $r . '" fill="' . self::PHYS_STROKE . '" stroke="#ffffff" stroke-width="' . ($sig ? '2' : '1.2') . '"/>';
+                // Подпись Знач. рядом с точкой, наружу вдоль оси; жирная при p<0.05.
+                $a = $ang($i);
+                $tx = $x + 14 * cos($a);
+                $ty = $y + 14 * sin($a) + 4;
+                $anchor = abs(cos($a)) < 0.25 ? 'middle' : (cos($a) > 0 ? 'start' : 'end');
+                $svg[] = '<text x="' . round($tx, 1) . '" y="' . round($ty, 1) . '" text-anchor="' . $anchor . '" font-size="' . ($sig ? '12' : '10') . '"'
+                       . ($sig ? ' font-weight="bold"' : '') . ' fill="' . self::PHYS_TEXT . '">' . self::num($v) . '</text>';
             }
         }
 
@@ -109,16 +132,19 @@ final class Chart {
         $svg[] = '<polygon points="' . implode(' ', $poly) . '" fill="' . self::COG_FILL . '" fill-opacity="' . self::COG_OPACITY . '" stroke="' . self::COG_STROKE . '" stroke-width="2.5"/>';
         foreach (explode(' ', implode(' ', $poly)) as $pair) {
             [$x, $y] = explode(',', $pair);
-            $svg[] = '<circle cx="' . $x . '" cy="' . $y . '" r="3.8" fill="' . self::COG_STROKE . '"/>';
+            $svg[] = '<circle cx="' . $x . '" cy="' . $y . '" r="4" fill="' . self::COG_STROKE . '" stroke="#ffffff" stroke-width="1.2"/>';
         }
 
-        // Legend.
-        $ly = $size - 16;
+        // Legend + пояснение шкалы физиологии.
+        $hasPhys = !empty($physPts);
+        $ly = $size - ($hasPhys ? 30 : 16);
         $svg[] = '<rect x="' . ($cx - 150) . '" y="' . ($ly - 11) . '" width="13" height="13" fill="' . self::COG_STROKE . '"/>';
         $svg[] = '<text x="' . ($cx - 132) . '" y="' . $ly . '" font-size="12" fill="' . self::TEXT . '">Когнитивный профиль</text>';
-        if ($phys !== null) {
+        if ($hasPhys) {
             $svg[] = '<rect x="' . ($cx + 20) . '" y="' . ($ly - 11) . '" width="13" height="13" fill="' . self::PHYS_STROKE . '"/>';
-            $svg[] = '<text x="' . ($cx + 38) . '" y="' . $ly . '" font-size="12" fill="' . self::TEXT . '">Физиология (значимость)</text>';
+            $svg[] = '<text x="' . ($cx + 38) . '" y="' . $ly . '" font-size="12" fill="' . self::TEXT . '">Физиология (Знач.)</text>';
+            $svg[] = '<text x="' . $cx . '" y="' . ($size - 10) . '" text-anchor="middle" font-size="10" fill="#8a949d">'
+                   . 'Знач.: 0 (медиана) — середина шкалы, &gt;0 — наружу, &lt;0 — к центру; жирная точка — p&lt;0.05</text>';
         }
 
         $svg[] = '</svg>';
@@ -151,6 +177,11 @@ final class Chart {
         $m = 0.0;
         foreach ($vals as $v) { if ($v !== null && abs((float) $v) > $m) $m = abs((float) $v); }
         return $m;
+    }
+
+    /** Compact number: 9.0 → "9", -3.5 → "-3.5". */
+    private static function num(float $v): string {
+        return rtrim(rtrim(number_format($v, 1, '.', ''), '0'), '.');
     }
 
     private static function esc(string $s): string {
