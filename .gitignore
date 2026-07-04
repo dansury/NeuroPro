@@ -1,14 +1,12 @@
-# Runtime data (SQLite DB, logs, uploads, watch inbox) — never committed
-app/data/*.db
-app/data/*.db-wal
-app/data/*.db-shm
-app/data/logs/
-app/data/uploads/
-app/data/incoming/
+# Runtime data (SQLite DB, logs, uploads, watch inbox) — never committed.
+# Каталог данных живёт НАД веб-корнем: локально это data/ в корне репозитория
+# (cfg_data_root() в www/lib/config.php); www/data — крайний fallback.
+data/
+www/data/
 
-# Local env / secrets
+# Local env / secrets (.env лежит рядом с data/ — над веб-корнем)
 .env
-app/.env
+www/.env
 
 # OS / editor
 .DS_Store

@@ -8,6 +8,43 @@
  * No secrets in code — supply keys via ENV or setup.php.
  */
 
+// ── .env ──────────────────────────────────────────────────────────────────
+// Файл .env кладётся НАД веб-корнем (рядом с каталогом data/): локально это
+// корень репозитория (веб-корень — www/), на хостинге — каталог над корнем
+// сайта. Так секреты не попадают ни в git, ни в зону раздачи веб-сервера.
+// Порядок поиска: ENV NP_ENV_FILE → <над веб-корнем>/.env → <веб-корень>/.env.
+// Реальные переменные окружения процесса имеют приоритет над файлом.
+if (!function_exists('cfg_load_env_file')) {
+    function cfg_load_env_file(): void {
+        static $loaded = false;
+        if ($loaded) return;
+        $loaded = true;
+        $webroot = dirname(__DIR__); // lib лежит в веб-корне
+        $candidates = array_filter([
+            getenv('NP_ENV_FILE') ?: null,
+            dirname($webroot) . '/.env',
+            $webroot . '/.env',
+        ]);
+        foreach ($candidates as $file) {
+            if (!is_file($file) || !is_readable($file)) continue;
+            foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                $line = trim($line);
+                if ($line === '' || $line[0] === '#' || !str_contains($line, '=')) continue;
+                [$k, $v] = explode('=', $line, 2);
+                $k = trim($k);
+                // Хвостовой комментарий после значения (KEY=val  # прим.) отрезаем.
+                $v = trim((string) preg_replace('/\s+#.*$/', '', $v));
+                $v = trim($v, "\"'");
+                if ($k === '' || getenv($k) !== false) continue; // ENV процесса важнее
+                putenv($k . '=' . $v);
+                $_ENV[$k] = $v;
+            }
+            return; // первый найденный файл выигрывает
+        }
+    }
+}
+cfg_load_env_file();
+
 if (!function_exists('cfg_env')) {
     function cfg_env(string $key, ?string $default = null): ?string {
         $v = getenv($key);
@@ -19,7 +56,7 @@ if (!function_exists('cfg_env')) {
 // Каталог данных (SQLite, логи, загрузки, watch-папка). Приоритет:
 //   1. ENV NP_DATA_DIR
 //   2. каталог data НАД веб-корнем — не отдаётся веб-сервером
-//      (локально это app/data, на хостинге — рядом с корнем сайта)
+//      (локально это data/ в корне репозитория, на хостинге — рядом с корнем сайта)
 //   3. data внутри веб-корня — крайний случай, когда родительский каталог
 //      недоступен на запись
 if (!function_exists('cfg_data_root')) {

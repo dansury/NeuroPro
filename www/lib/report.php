@@ -17,7 +17,7 @@ final class Report {
      * @param array  $profile   profile array (see Profile::fromSheets)
      * @param string $interpHtml interpretation rendered to HTML
      * @param array  $cfg       config (branding)
-     * @param array  $opts      ['phys' => alignedArray|null, 'autoprint' => bool]
+     * @param array  $opts      ['phys' => Phys::decode-структура|null, 'autoprint' => bool]
      */
     public static function html(array $profile, string $interpHtml, array $cfg, array $opts = []): string {
         $brand = $cfg['BRAND_NAME'] ?? 'НейроПро';
@@ -27,9 +27,12 @@ final class Report {
         $labels = array_map(static fn ($s) => Profile::shortLabel($s['label']), $profile['scores']);
         $cog    = array_map(static fn ($s) => (float) $s['score'], $profile['scores']);
         $phys   = $opts['phys'] ?? null;
-        $svg    = Chart::svg($labels, $cog, (int) ($profile['score_max'] ?? 10), $phys, [
+        // Обратная совместимость: старые вызовы передавали голый aligned-массив.
+        if ($phys !== null && array_is_list($phys)) $phys = ['aligned' => $phys, 'p' => [], 'sig' => []];
+        $svg    = Chart::svg($labels, $cog, (int) ($profile['score_max'] ?? 10), $phys['aligned'] ?? null, [
             'title' => Profile::chartTitle((string) ($profile['test_key'] ?? '')),
             'size'  => 600,
+            'phys_sig' => $phys['sig'] ?? [],
         ]);
 
         $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
@@ -83,6 +86,8 @@ final class Report {
 
   <?= self::scoresTable($profile, $h) ?>
 
+  <?= self::physTable($profile, $phys, $h) ?>
+
   <div class="interp"><?= $interpHtml ?></div>
 
   <div class="foot">
@@ -134,6 +139,35 @@ final class Report {
   <?php endforeach; ?>
 </div>
 <?php endif;
+        return ob_get_clean();
+    }
+
+    /**
+     * Таблица физиологии («Знач.» со скриншота значимости). Строки с p<0.05 —
+     * жирные; оси без данных — прочерк (ничего не выдумываем).
+     */
+    private static function physTable(array $profile, ?array $phys, callable $h): string {
+        if ($phys === null) return '';
+        $aligned = $phys['aligned'] ?? [];
+        $hasAny = false;
+        foreach ($aligned as $v) { if ($v !== null) { $hasAny = true; break; } }
+        if (!$hasAny) return '';
+        ob_start(); ?>
+<table class="scores">
+  <tr><th>Смысло-эмоциональная значимость</th><th>Знач.</th><th>Достоверность</th></tr>
+  <?php foreach ($profile['scores'] as $i => $s):
+      $v = $aligned[$i] ?? null;
+      $p = $phys['p'][$i] ?? null;
+      $sig = !empty($phys['sig'][$i]);
+      $style = $sig ? ' style="font-weight:bold"' : ''; ?>
+  <tr>
+    <td<?= $style ?>><?= $h($s['label']) ?></td>
+    <td class="num"<?= $style ?>><?= $v === null ? '—' : $h(self::num((float) $v)) ?></td>
+    <td class="num"<?= $style ?>><?= $p === null ? ($sig ? 'p&lt;0.05' : '—') : ($p < 0.05 ? 'p&lt;0.05' : 'p&gt;0.05') ?></td>
+  </tr>
+  <?php endforeach; ?>
+</table>
+<?php
         return ob_get_clean();
     }
 

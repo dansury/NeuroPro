@@ -6,7 +6,7 @@
  *
  * Кроссплатформенно: работает локально на Windows (см. watch.bat) и на *nix.
  *
- * Usage:  php app/bin/watch.php [intervalSeconds=5]
+ * Usage:  php bin/watch.php [intervalSeconds=5]
  *
  * Идемпотентность: обработанные файлы фиксируются в БД по sha1, поэтому файл
  * подхватывается один раз. Частично записанные файлы (копирование/выгрузка ещё
@@ -15,7 +15,7 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../public/lib/bootstrap.php';
+require_once __DIR__ . '/../www/lib/bootstrap.php';
 
 // На Windows консоль по умолчанию в cp866 — переключаем ввод/вывод PHP на UTF-8,
 // чтобы кириллица в логах не превращалась в «кракозябры».

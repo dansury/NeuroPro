@@ -16,7 +16,7 @@ $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 
 try {
     // Бутстрап (config + БД + LLM + сидинг) держим ВНУТРИ try: при сбое — например
-    // нет прав на запись в app/data/ — пользователь увидит понятную страницу
+    // нет прав на запись в каталог данных — пользователь увидит понятную страницу
     // ошибки, а не «пустой» 500. Деталь уходит в лог сервера.
     $cfg = np_boot();
     $page = $_GET['p'] ?? 'dashboard';
@@ -26,6 +26,7 @@ try {
         case 'upload':        $method === 'POST' ? act_upload($cfg) : view_upload($cfg, $h); break;
         case 'profile':       view_profile($cfg, $h); break;
         case 'screenshot':    act_screenshot($cfg); break;
+        case 'phys_save':     act_phys_save($cfg); break;
         case 'interpret':     act_interpret($cfg); break;
         case 'result':        view_result($cfg, $h); break;
         case 'report':        view_report($cfg); break;
@@ -127,13 +128,21 @@ function view_profile(array $cfg, callable $h): void {
 function view_result(array $cfg, callable $h): void {
     $p = profile_row((int)($_GET['id'] ?? 0));
     $prof = profile_decode($p);
-    $phys = $p['phys_json'] ? json_decode($p['phys_json'], true) : null;
+    $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
     $svg = cognitive_svg($prof, $phys);
     $interps = Db::all('SELECT i.*, v.version_no FROM interpretations i JOIN prompt_versions v ON v.id=i.prompt_version_id WHERE i.profile_id=? ORDER BY i.created_at DESC', [$p['id']]);
     $active = Prompts::activeVersion($prof['test_key']);
     ob_start(); ?>
     <h1><?= $h($prof['name']) ?> <span class="muted">— <?= $h($prof['methodic']) ?></span></h1>
+    <?php if ($phys !== null && $phys['error'] !== null): ?>
+      <div class="msg bad"><b>Ошибка распознавания скриншота:</b> <?= $h($phys['error']) ?><br>
+      Значения физиологии можно ввести вручную в таблице ниже.</div>
+    <?php elseif ($phys !== null && !Phys::hasData($phys)): ?>
+      <div class="msg warn">Физиология не распознана: OCR не нашёл ни одного значения «Знач.» по осям.
+      Проверьте скриншот или введите значения вручную в таблице ниже.</div>
+    <?php endif; ?>
     <div class="chart card"><?= $svg ?></div>
+    <?= phys_table_form($prof, $phys, (int)$p['id'], $h) ?>
     <form method="post" action="?p=interpret" class="row">
       <input type="hidden" name="id" value="<?= (int)$p['id'] ?>">
       <button class="btn" type="submit" <?= $active ? '' : 'disabled' ?>>▶ Сделать интерпретацию (промпт <?= $active ? 'v'.$h($active['version_no']).', '.$h($active['model_id']) : 'не выбран' ?>)</button>
@@ -160,7 +169,7 @@ function view_report(array $cfg): void {
     if (!$it) { http_response_code(404); echo 'not found'; return; }
     $p = profile_row((int)$it['profile_id']);
     $prof = profile_decode($p);
-    $phys = $p['phys_json'] ? json_decode($p['phys_json'], true) : null;
+    $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
     $html = Report::html($prof, Report::mdToHtml($it['content']), $cfg, [
         'phys' => $phys, 'autoprint' => !empty($_GET['print']),
     ]);
@@ -262,16 +271,50 @@ function act_screenshot(array $cfg): void {
     } elseif (!empty($_POST['pasted_image']) && preg_match('#^data:(image/\w+);base64,(.*)$#s', (string)$_POST['pasted_image'], $m)) {
         $mime = $m[1]; $bytes = base64_decode($m[2]);
     }
-    $ocrText = '';
-    if ($bytes !== null) {
-        try { $ocrText = LLM::ocrImage($bytes, $mime); }
-        catch (Throwable $e) { $ocrText = ''; /* keep going; phys optional */ }
+    if ($bytes === null) {
+        redirect('?p=profile&id=' . $id . '&err=' . urlencode('Скриншот не передан: вставьте изображение (Ctrl+V) или выберите файл.'));
     }
+    // Ошибку OCR не глушим: сохраняем в профиль и показываем оператору —
+    // «все ошибки обязательно выводить». Профиль при этом остаётся рабочим.
+    $ocrText = '';
+    $ocrError = null;
+    try { $ocrText = LLM::ocrImage($bytes, $mime); }
+    catch (Throwable $e) { $ocrError = $e->getMessage(); }
     $labels = array_map(fn ($s) => $s['label'], $prof['scores']);
     $parsed = Phys::parse($ocrText, $labels);
+    if ($ocrError !== null) {
+        $parsed['error'] = 'OCR недоступен: ' . $ocrError;
+    } elseif (!Phys::hasData($parsed)) {
+        $parsed['error'] = 'OCR отработал, но ни одно значение «Знач.» не сопоставлено с осями. Распознанный текст сохранён (см. лог), значения можно ввести вручную.';
+    }
     Db::q('UPDATE profiles SET phys_ocr_text=?, phys_json=?, status=? WHERE id=?',
-        [$ocrText, json_encode($parsed['aligned']), 'ready', $id]);
-    redirect('?p=result&id=' . $id);
+        [$ocrText, json_encode($parsed, JSON_UNESCAPED_UNICODE), 'ready', $id]);
+    redirect('?p=result&id=' . $id . ($parsed['error'] !== null ? '&err=' . urlencode($parsed['error']) : ''));
+}
+
+/** Ручная правка физиологии: значения «Знач.» и флажки p<0.05 по осям. */
+function act_phys_save(array $cfg): void {
+    $id = (int)($_POST['id'] ?? 0);
+    $p = profile_row($id);
+    $prof = profile_decode($p);
+    $count = count($prof['scores']);
+    $old = Phys::decode($p['phys_json'] ?? null, $count);
+    $parsed = [
+        'aligned' => Phys::fromManual((array)($_POST['zna'] ?? []), $count),
+        'p'       => $old['p'] ?? array_fill(0, $count, null),
+        'sig'     => [],
+        'rows'    => $old['rows'] ?? [],
+        'error'   => null, // оператор поправил вручную — прежняя ошибка OCR снята
+    ];
+    $sigPost = (array)($_POST['sig'] ?? []);
+    for ($i = 0; $i < $count; $i++) {
+        $parsed['sig'][$i] = !empty($sigPost[$i]);
+        // Ручной флажок перекрывает распознанное p: снят — значит недостоверно.
+        if ($old !== null && $parsed['sig'][$i] !== ($old['sig'][$i] ?? false)) $parsed['p'][$i] = null;
+    }
+    Db::q('UPDATE profiles SET phys_json=?, status=? WHERE id=?',
+        [json_encode($parsed, JSON_UNESCAPED_UNICODE), 'ready', $id]);
+    redirect('?p=result&id=' . $id . '&ok=' . urlencode('Физиология сохранена.'));
 }
 
 function act_interpret(array $cfg): void {
@@ -279,24 +322,38 @@ function act_interpret(array $cfg): void {
     $p = profile_row($id);
     $prof = profile_decode($p);
     $version = Prompts::activeVersion($prof['test_key']);
-    if (!$version) throw new RuntimeException('Для этой методики не выбран активный промпт');
-    $content = Interpret::run($prof, (string)$p['phys_ocr_text'], $version);
+    if (!$version) {
+        redirect('?p=result&id=' . $id . '&err=' . urlencode('Для этой методики не выбран активный промпт (страница «Промпты»).'));
+    }
+    // Ошибку нейросети показываем на странице результата, а не голой 500-й.
+    try {
+        $content = Interpret::run($prof, (string)$p['phys_ocr_text'], $version);
+    } catch (Throwable $e) {
+        redirect('?p=result&id=' . $id . '&err=' . urlencode('Нейросеть недоступна, интерпретация не создана: ' . $e->getMessage()));
+    }
     Interpret::save($id, (int)$version['id'], $version['model_id'], $content);
-    redirect('?p=result&id=' . $id);
+    redirect('?p=result&id=' . $id . '&ok=' . urlencode('Интерпретация готова.'));
 }
 
 function act_email(array $cfg): void {
     require_once __DIR__ . '/../lib/mailer.php';
     $it = Db::one('SELECT * FROM interpretations WHERE id=?', [(int)($_GET['interp'] ?? 0)]);
     if (!$it) throw new RuntimeException('Интерпретация не найдена');
-    $p = profile_row((int)$it['profile_id']);
+    $pid = (int)$it['profile_id'];
+    $p = profile_row($pid);
     $prof = profile_decode($p);
-    $phys = $p['phys_json'] ? json_decode($p['phys_json'], true) : null;
+    $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
     $html = Report::html($prof, Report::mdToHtml($it['content']), $cfg, ['phys' => $phys]);
     $to = $cfg['ADMIN_EMAIL'] ?? '';
-    if ($to === '') throw new RuntimeException('Не задан адрес получателя (ADMIN_EMAIL в настройках)');
-    Mailer::sendCustom($cfg, $to, 'Результаты исследования НейроПро', $html, strip_tags($it['content']));
-    redirect('?p=result&id=' . (int)$it['profile_id']);
+    if ($to === '') {
+        redirect('?p=result&id=' . $pid . '&err=' . urlencode('Не задан адрес получателя (ADMIN_EMAIL в настройках /setup.php).'));
+    }
+    try {
+        Mailer::sendCustom($cfg, $to, 'Результаты исследования НейроПро', $html, strip_tags($it['content']));
+    } catch (Throwable $e) {
+        redirect('?p=result&id=' . $pid . '&err=' . urlencode('Письмо не отправлено (SMTP): ' . $e->getMessage()));
+    }
+    redirect('?p=result&id=' . $pid . '&ok=' . urlencode('Письмо отправлено на ' . $to . '.'));
 }
 
 function act_prompt_save(array $cfg): void {
@@ -370,16 +427,81 @@ function profile_from_text(string $text, string $methodic): array {
             'score_max' => Profile::scoreMax($scores, $key)];
 }
 
+/** @param array|null $phys структура Phys::decode (aligned + sig) или null */
 function cognitive_svg(array $prof, ?array $phys = null): string {
     $labels = array_map(fn ($s) => Profile::shortLabel($s['label']), $prof['scores']);
     $cog = array_map(fn ($s) => (float) $s['score'], $prof['scores']);
-    return Chart::svg($labels, $cog, (int)($prof['score_max'] ?? 10), $phys, ['title' => Profile::chartTitle((string)($prof['test_key'] ?? '')), 'size' => 560]);
+    return Chart::svg($labels, $cog, (int)($prof['score_max'] ?? 10), $phys['aligned'] ?? null, [
+        'title' => Profile::chartTitle((string)($prof['test_key'] ?? '')),
+        'size' => 560,
+        'phys_sig' => $phys['sig'] ?? [],
+    ]);
+}
+
+/**
+ * Таблица распознанной физиологии («Знач.» + достоверность) с ручной правкой.
+ * Строки с p<0.05 — жирные; нераспознанные значения — прочерк (пустое поле).
+ */
+function phys_table_form(array $prof, ?array $phys, int $id, callable $h): string {
+    if ($phys === null) return '';
+    ob_start(); ?>
+    <div class="card">
+      <h2>Физиология — «Знач.» со скриншота значимости</h2>
+      <p class="muted">Проверьте распознанные значения и достоверность; при необходимости поправьте и сохраните.
+      Пустое поле = данных нет (ось останется без точки).</p>
+      <form method="post" action="?p=phys_save">
+        <input type="hidden" name="id" value="<?= $id ?>">
+        <table class="grid">
+          <tr><th>Ось</th><th>Знач.</th><th>Достоверность</th><th>p&lt;0.05</th></tr>
+          <?php foreach ($prof['scores'] as $i => $s):
+              $v = $phys['aligned'][$i] ?? null;
+              $pv = $phys['p'][$i] ?? null;
+              $sig = !empty($phys['sig'][$i]); ?>
+          <tr<?= $sig ? ' class="sig"' : '' ?>>
+            <td><?= $h($s['label']) ?></td>
+            <td><input class="num" type="text" name="zna[<?= $i ?>]" value="<?= $v === null ? '' : $h(rtrim(rtrim(number_format((float)$v, 1, '.', ''), '0'), '.')) ?>" placeholder="—"></td>
+            <td><?= $pv === null ? '<span class="muted">—</span>' : $h(($pv < Phys::SIG ? 'p<' : 'p>') . '0.05') ?></td>
+            <td><input type="checkbox" name="sig[<?= $i ?>]" value="1" <?= $sig ? 'checked' : '' ?>></td>
+          </tr>
+          <?php endforeach; ?>
+        </table>
+        <button class="btn sm" type="submit">Сохранить физиологию</button>
+      </form>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+/**
+ * Предупреждения о ненастроенных внешних сервисах — выводятся на каждой
+ * странице приложения: оператор сразу видит, что OCR/нейросеть/почта
+ * недоступны, а не получает молчаливо пустой результат.
+ */
+function service_warnings(array $cfg): array {
+    $w = [];
+    $hasYA = !empty($cfg['YANDEX_API_KEY']) && !empty($cfg['YANDEX_FOLDER_ID']);
+    $hasOR = !empty($cfg['OPENROUTER_API_KEY']);
+    if (!$hasYA) {
+        $w[] = 'Yandex OCR не настроен (YANDEX_API_KEY / YANDEX_FOLDER_ID) — распознавание скриншотов значимости недоступно. Задайте ключи в настройках или .env.';
+    }
+    if (!$hasYA && !$hasOR) {
+        $w[] = 'Ни один LLM-провайдер не настроен (OpenRouter / Yandex) — интерпретация нейросетью недоступна.';
+    }
+    if (empty($cfg['SMTP_USER']) || empty($cfg['SMTP_PASS'])) {
+        $w[] = 'SMTP не настроен (SMTP_USER / SMTP_PASS) — отправка отчётов на почту недоступна.';
+    }
+    return $w;
 }
 
 function redirect(string $to): void { header('Location: ' . $to); exit; }
 
 function layout(string $title, string $body, callable $h): void {
     $err = $_GET['err'] ?? '';
+    $ok = $_GET['ok'] ?? '';
+    // Баннеры о ненастроенных сервисах. try: layout зовётся и со страницы
+    // ошибки бутстрапа, где конфиг может быть недоступен.
+    $warnings = [];
+    try { $warnings = service_warnings(np_boot()); } catch (Throwable $e) { /* без баннеров */ }
     header('Content-Type: text/html; charset=utf-8'); ?>
 <!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -407,6 +529,10 @@ function layout(string $title, string $body, callable $h): void {
   .paste{border:2px dashed #cfd6dd;border-radius:6px;padding:24px;text-align:center;color:#8a949d;cursor:text}
   .interp h1,.interp h2,.interp h3{color:#b3203b}
   .msg.bad{background:#fdecef;border:1px solid #e0a6b0;padding:10px;border-radius:6px;margin:10px 0}
+  .msg.warn{background:#fff8e6;border:1px solid #e8d29a;padding:10px;border-radius:6px;margin:10px 0}
+  .msg.ok{background:#eaf7ee;border:1px solid #a8d5b5;padding:10px;border-radius:6px;margin:10px 0}
+  tr.sig td{font-weight:bold}
+  input.num{width:80px;text-align:center}
   @media(max-width:760px){.grid2{grid-template-columns:1fr}}
 </style></head><body>
 <header><a href="/" style="color:#b3203b"><b>НейроПро</b></a>
@@ -416,7 +542,9 @@ function layout(string $title, string $body, callable $h): void {
   <a href="/setup.php">Настройки</a>
 </header>
 <main>
+  <?php foreach ($warnings as $w): ?><div class="msg warn">⚠ <?= $h($w) ?> <a href="/setup.php">Настройки →</a></div><?php endforeach; ?>
   <?php if ($err): ?><div class="msg bad"><?= $h($err) ?></div><?php endif; ?>
+  <?php if ($ok): ?><div class="msg ok"><?= $h($ok) ?></div><?php endif; ?>
   <?= $body ?>
 </main></body></html>
 <?php
