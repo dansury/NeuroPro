@@ -100,23 +100,84 @@ function view_profile(array $cfg, callable $h): void {
         <p class="muted">Вставьте скриншот таблицы (Ctrl+V) или выберите файл. Распознаём через Yandex OCR.</p>
         <form method="post" action="?p=screenshot" enctype="multipart/form-data" id="ssform">
           <input type="hidden" name="id" value="<?= (int)$p['id'] ?>">
-          <div id="paste" class="paste" tabindex="0">Кликните сюда и нажмите Ctrl+V, чтобы вставить скриншот</div>
+          <div id="paste" class="paste" tabindex="0">Кликните, чтобы вставить из буфера обмена — или нажмите Ctrl+V, или перетащите картинку сюда</div>
           <input type="hidden" name="pasted_image" id="pasted_image">
           <img id="preview" style="max-width:100%;display:none;margin:8px 0;border:1px solid #ccc">
-          <label><span>…или файл</span><input type="file" name="screenshot" accept="image/*"></label>
+          <label><span>…или файл</span><input type="file" id="ssfile" name="screenshot" accept="image/*"></label>
           <button class="btn" type="submit">Распознать и продолжить →</button>
         </form>
       </div>
     </div>
     <script>
     (function(){
-      const z=document.getElementById('paste'), inp=document.getElementById('pasted_image'), pv=document.getElementById('preview');
-      window.addEventListener('paste', e=>{
-        for(const it of (e.clipboardData||{}).items||[]){
-          if(it.type.indexOf('image')===0){
-            const r=new FileReader(); r.onload=()=>{inp.value=r.result; pv.src=r.result; pv.style.display='block'; z.textContent='Скриншот вставлен ✓';};
-            r.readAsDataURL(it.getAsFile());
+      const z=document.getElementById('paste'),
+            inp=document.getElementById('pasted_image'),
+            pv=document.getElementById('preview'),
+            fileInp=document.getElementById('ssfile');
+      const HINT='Кликните, чтобы вставить из буфера обмена — или нажмите Ctrl+V, или перетащите картинку сюда';
+      const show=(m)=>{ z.textContent=m; };
+
+      // Единый путь: показать превью и положить data URL в скрытое поле.
+      function useBlob(blob){
+        if(!blob) return false;
+        const r=new FileReader();
+        r.onload=()=>{ inp.value=r.result; pv.src=r.result; pv.style.display='block'; show('Скриншот вставлен ✓'); };
+        r.readAsDataURL(blob);
+        if(fileInp) fileInp.value=''; // вставка перекрывает выбранный ранее файл
+        return true;
+      }
+
+      // 1) Обычная вставка Ctrl+V. Свежий скриншот кладёт image/* прямо в событие.
+      function handlePaste(e){
+        const items=((e.clipboardData||window.clipboardData||{}).items)||[];
+        for(const it of items){
+          if(it.type && it.type.indexOf('image')===0){
+            const f=it.getAsFile();
+            if(f){ e.preventDefault(); useBlob(f); return; }
           }
+        }
+      }
+      window.addEventListener('paste', handlePaste);
+      z.addEventListener('paste', handlePaste);
+
+      // 2) Клик по зоне: асинхронный Clipboard API читает СКОПИРОВАННУЮ картинку
+      //    (из файла/браузера/просмотрщика), которую событие paste часто не отдаёт.
+      z.addEventListener('click', async ()=>{
+        z.focus();
+        if(!(navigator.clipboard && navigator.clipboard.read)){
+          show('Нажмите Ctrl+V, чтобы вставить скриншот'); return;
+        }
+        try{
+          const items=await navigator.clipboard.read();
+          for(const it of items){
+            const type=(it.types||[]).find(t=>t.indexOf('image')===0);
+            if(type){ useBlob(await it.getType(type)); return; }
+          }
+          show('В буфере обмена нет картинки — скопируйте изображение или нажмите Ctrl+V');
+        }catch(err){
+          show('Не удалось прочитать буфер автоматически — нажмите Ctrl+V или выберите файл');
+        }
+      });
+
+      // 3) Перетаскивание картинки прямо в зону.
+      ['dragover','dragenter'].forEach(ev=>z.addEventListener(ev, e=>{ e.preventDefault(); z.style.borderColor='#b3203b'; }));
+      ['dragleave','drop'].forEach(ev=>z.addEventListener(ev, e=>{ e.preventDefault(); if(ev!=='drop') z.style.borderColor=''; }));
+      z.addEventListener('drop', e=>{
+        z.style.borderColor='';
+        const f=((e.dataTransfer&&e.dataTransfer.files)||[])[0];
+        if(f && f.type.indexOf('image')===0) useBlob(f); else show(HINT);
+      });
+
+      // 4) Выбор файла — показываем превью; на сервере файл имеет приоритет,
+      //    поэтому data URL из вставки очищаем, чтобы не отправлять две копии.
+      if(fileInp) fileInp.addEventListener('change', ()=>{
+        const f=fileInp.files&&fileInp.files[0];
+        if(!f) return;
+        inp.value='';
+        if(f.type.indexOf('image')===0){
+          const r=new FileReader();
+          r.onload=()=>{ pv.src=r.result; pv.style.display='block'; };
+          r.readAsDataURL(f);
         }
       });
     })();

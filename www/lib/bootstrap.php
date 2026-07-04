@@ -37,23 +37,73 @@ function np_boot(): array {
 const NP_PROMPT_V1_COMMENT = 'Импортировано из исходного промпта';
 const NP_PROMPT_V2_COMMENT = 'v2: адаптация под недорогие модели (DeepSeek и др.) — вход описан как распознанный текст скриншота';
 
+/** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
+function np_prompt_families(): array {
+    return [
+        'smu' => ['v1' => 'smu_v1.php', 'src' => 'SMU PROMPT.txt', 'name' => 'Интерпретация СМУ (Структура мотивации участия)'],
+        'lsi' => ['v1' => 'lsi_v1.php', 'src' => 'LSI PROMPT.txt', 'name' => 'Интерпретация ИЖС/LSI (Индекс жизненного стиля)'],
+        'bd'  => ['v1' => 'bd_v1.php',  'src' => 'BD PROMPT.txt',  'name' => 'Интерпретация Басса-Дарки (агрессивность и враждебность)'],
+    ];
+}
+
+/**
+ * Текст исходного (v1) промпта семейства. Приоритет:
+ *   1. вшитый файл lib/prompts/<key>_v1.php — лежит ВНУТРИ веб-корня, поэтому
+ *      деплоится через pull.php и доступен на проде;
+ *   2. Sources/<FILE>.txt — только для локальной разработки (в git, но каталог
+ *      Sources/ на прод не зеркалится);
+ *   3. заглушка — если исходника нет нигде (промпт правится вручную в UI).
+ */
+function np_prompt_v1_body(string $key): string {
+    $fam = np_prompt_families()[$key] ?? null;
+    if ($fam === null) return '';
+    $bundled = __DIR__ . '/prompts/' . $fam['v1'];
+    if (is_file($bundled)) {
+        $body = trim((string) require $bundled);
+        if ($body !== '') return $body;
+    }
+    $srcPath = dirname(__DIR__, 2) . '/Sources/' . $fam['src'];
+    if (is_file($srcPath)) {
+        $body = trim((string) file_get_contents($srcPath));
+        if ($body !== '') return $body;
+    }
+    return 'Промпт для ' . $fam['name'];
+}
+
 /** Seed СМУ + LSI + Басса-Дарки prompt families from the bundled source prompt files. */
 function np_seed_prompts(): void {
-    // Локально Sources лежит в корне репозитория (два уровня над lib: www/lib); на
-    // хостинге каталога нет — тогда сидируется заглушка, промпт правится в UI.
-    $sources = dirname(__DIR__, 2) . '/Sources';
-    $seed = [
-        'smu' => ['SMU PROMPT.txt', 'Интерпретация СМУ (Структура мотивации участия)'],
-        'lsi' => ['LSI PROMPT.txt', 'Интерпретация ИЖС/LSI (Индекс жизненного стиля)'],
-        'bd'  => ['BD PROMPT.txt', 'Интерпретация Басса-Дарки (агрессивность и враждебность)'],
-    ];
-    foreach ($seed as $key => [$file, $name]) {
+    foreach (np_prompt_families() as $key => $fam) {
         if (Prompts::family($key)) continue;
-        $path = $sources . '/' . $file;
-        $body = is_file($path) ? (string) file_get_contents($path) : ('Промпт для ' . $name);
-        Prompts::seed($key, $name, trim($body), 'deepseek-r1', 'yandex');
+        Prompts::seed($key, $fam['name'], np_prompt_v1_body($key), 'deepseek-r1', 'yandex');
     }
+    np_heal_stub_prompts();
     np_seed_prompts_v2();
+}
+
+/**
+ * Лечит семейства, засеянные РАНЬШЕ заглушкой «Промпт для …»: так бывало на
+ * проде, когда исходный текст ещё не был вшит в www/, а каталог Sources/ туда
+ * не деплоится. Если импортированная v1-версия — заглушка/пустая и по ней нет
+ * интерпретаций, подставляем реальный вшитый текст. Правим ровно ту служебную
+ * версию, что создаётся автосидингом (по маркеру-комментарию); ручные версии и
+ * версии с интерпретациями не трогаем — история не теряется.
+ */
+function np_heal_stub_prompts(): void {
+    foreach (np_prompt_families() as $key => $fam) {
+        $family = Prompts::family($key);
+        if (!$family) continue;
+        $v1 = Db::one(
+            'SELECT * FROM prompt_versions WHERE prompt_id = ? AND comment = ? ORDER BY version_no ASC LIMIT 1',
+            [(int) $family['id'], NP_PROMPT_V1_COMMENT]
+        );
+        if (!$v1) continue;
+        $body = trim((string) $v1['body']);
+        if ($body !== '' && !str_starts_with($body, 'Промпт для ')) continue; // уже реальный текст
+        if (Prompts::interpCount((int) $v1['id']) > 0) continue;               // по заглушке уже считали — не трогаем
+        $real = np_prompt_v1_body($key);
+        if ($real === '' || str_starts_with($real, 'Промпт для ')) continue;   // лечить нечем
+        Db::q('UPDATE prompt_versions SET body = ? WHERE id = ?', [$real, (int) $v1['id']]);
+    }
 }
 
 /**

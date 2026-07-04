@@ -26,6 +26,10 @@ header('Cache-Control: no-store');
 $ADMIN_PW = (string) ($cfg['ADMIN_PASSWORD'] ?? '');
 $login_error = null;
 
+$setup_error = null;
+// Первый запуск: пароль администратора не задан НИГДЕ (БД settings / ENV / .env).
+$is_first_run = ($ADMIN_PW === '');
+
 if (($_POST['action'] ?? '') === 'login') {
     $pw = (string) ($_POST['password'] ?? '');
     if ($ADMIN_PW !== '' && hash_equals($ADMIN_PW, $pw)) {
@@ -34,6 +38,26 @@ if (($_POST['action'] ?? '') === 'login') {
         exit;
     }
     $login_error = 'Неверный пароль';
+}
+
+// Первичная установка пароля. Пока ADMIN_PASSWORD пуст, оператор задаёт его
+// прямо здесь — значение уходит в таблицу settings (каталог data/ НАД
+// веб-корнем, переживает деплой). Не нужно ни править перезаписываемый
+// config.php, ни загружать .env на хостинг. Кто первым открыл — тот и задал,
+// поэтому на проде выполните первый запуск сразу после деплоя.
+if ($is_first_run && ($_POST['action'] ?? '') === 'setup_password') {
+    $pw  = (string) ($_POST['password'] ?? '');
+    $pw2 = (string) ($_POST['password2'] ?? '');
+    if (mb_strlen($pw) < 6) {
+        $setup_error = 'Пароль слишком короткий (минимум 6 символов).';
+    } elseif ($pw !== $pw2) {
+        $setup_error = 'Пароли не совпадают.';
+    } else {
+        $store->setSetting('ADMIN_PASSWORD', $pw);
+        $_SESSION['admin_authed'] = true;
+        header('Location: setup.php');
+        exit;
+    }
 }
 
 if (($_GET['logout'] ?? '') !== '') {
@@ -56,16 +80,29 @@ if (empty($_SESSION['admin_authed'])) {
       input { width: 100%; padding: 10px 12px; background: #0c1018; color: #edf1f7; border: 1px solid #1f2735; font: inherit; margin-bottom: 14px; }
       button { background: #00d4e8; color: #0c1018; border: 0; padding: 12px 18px; font-weight: 700; cursor: pointer; width: 100%; }
       .err { color: #ff4560; font-size: 13px; margin: 0 0 12px; }
+      .hint { color: #9fb0c8; font-size: 13px; line-height: 1.5; margin: 0 0 16px; }
+      .hint code { color: #00d4e8; }
     </style></head><body>
     <div class="box">
-      <h1>ВХОД В НАСТРОЙКИ</h1>
-      <?php if ($login_error): ?><p class="err"><?= $h($login_error) ?></p><?php endif; ?>
-      <?php if ($ADMIN_PW === ''): ?><p class="err">ADMIN_PASSWORD не задан (config.php / ENV).</p><?php endif; ?>
-      <form method="post" autocomplete="off">
-        <input type="hidden" name="action" value="login">
-        <input type="password" name="password" autofocus required placeholder="Пароль администратора">
-        <button type="submit">Войти</button>
-      </form>
+      <?php if ($is_first_run): ?>
+        <h1>ПЕРВЫЙ ЗАПУСК</h1>
+        <p class="hint">Пароль администратора ещё не задан. Задайте его сейчас — он сохранится в базе (каталог <code>data/</code> над веб-корнем) и переживёт деплой. Править <code>config.php</code> или загружать <code>.env</code> на хостинг не нужно.</p>
+        <?php if ($setup_error): ?><p class="err"><?= $h($setup_error) ?></p><?php endif; ?>
+        <form method="post" autocomplete="off">
+          <input type="hidden" name="action" value="setup_password">
+          <input type="password" name="password" autofocus required minlength="6" placeholder="Новый пароль администратора">
+          <input type="password" name="password2" required minlength="6" placeholder="Повторите пароль">
+          <button type="submit">Задать пароль и войти</button>
+        </form>
+      <?php else: ?>
+        <h1>ВХОД В НАСТРОЙКИ</h1>
+        <?php if ($login_error): ?><p class="err"><?= $h($login_error) ?></p><?php endif; ?>
+        <form method="post" autocomplete="off">
+          <input type="hidden" name="action" value="login">
+          <input type="password" name="password" autofocus required placeholder="Пароль администратора">
+          <button type="submit">Войти</button>
+        </form>
+      <?php endif; ?>
     </div></body></html><?php
     exit;
 }
@@ -206,6 +243,7 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
   <label><span>ERROR_EMAIL (уведомления об ошибках)</span><input type="text" name="ERROR_EMAIL" placeholder="<?= $h($eff('ERROR_EMAIL')) ?>"></label>
 
   <h2>Доступ</h2>
+  <p class="lede">Хранится в базе (каталог <code>data/</code> над веб-корнем) и переживает деплой — менять после каждого <code>pull.php</code> не нужно. Пустое поле оставляет текущий пароль.</p>
   <label><span>Пароль администратора (ADMIN_PASSWORD)</span><input type="password" name="ADMIN_PASSWORD" placeholder="<?= $h($mask($eff('ADMIN_PASSWORD'))) ?>"></label>
 
   <p><button type="submit">Сохранить</button></p>
