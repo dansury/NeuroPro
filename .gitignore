@@ -12,3 +12,6 @@ www/.env
 .DS_Store
 *.swp
 node_modules/
+
+# Grafify knowledge graph output (build locally with /graphify .)
+graphify-out/
