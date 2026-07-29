@@ -17,6 +17,7 @@ header('X-Robots-Tag: noindex, nofollow', true);
 
 require_once __DIR__ . '/lib/settings_store.php';
 require_once __DIR__ . '/lib/mailer.php';
+require_once __DIR__ . '/lib/llm.php';
 
 $cfg   = require __DIR__ . '/lib/config.php';
 $store = new SettingsStore($cfg['DB_PATH']);
@@ -108,10 +109,47 @@ if (empty($_SESSION['admin_authed'])) {
 }
 
 $messages = [];
+$probe = null;   // ['provider' => …, 'rows' => [['label','full_id','ok','error'], …]]
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'POST') {
-    if (isset($_POST['smtp_test'])) {
+    if (isset($_POST['models_probe'])) {
+        // Каталог AVAILABLE_MODELS широкий и общий для всех, а реально доступное
+        // зависит от ключа и (у Яндекса) от подключённых в каталоге моделей.
+        // Здесь проверяем факт доступности, не тратя токены на генерацию.
+        // Ключи, только что введённые в форму, сохраняем — иначе проверка шла бы
+        // по старым учётным данным. Пустые поля, как и при обычном сохранении,
+        // ничего не перезаписывают.
+        foreach (['OPENROUTER_API_KEY', 'YANDEX_API_KEY', 'YANDEX_FOLDER_ID'] as $k) {
+            $v = trim((string) ($_POST[$k] ?? ''));
+            if ($v !== '') $store->setSetting($k, $v);
+        }
+        $cfg_live = require __DIR__ . '/lib/config.php';
+        // Проверка идёт по всему каталогу подряд, поэтому таймаут на модель
+        // короткий — иначе одна «висящая» модель съедает время всей страницы.
+        $cfg_live['LLM_TIMEOUT_SEC'] = 10;
+        @set_time_limit(300);
+        LLM::init($cfg_live);
+        $prov = (string) $_POST['models_probe'] === 'openrouter' ? 'openrouter' : 'yandex';
+        $rows = [];
+        $catalog = $prov === 'openrouter' ? LLM::openRouterCatalog() : [];
+        if ($prov === 'openrouter' && !$catalog) {
+            $messages[] = ['ok' => false, 'text' => '⚠️ Не удалось получить список моделей OpenRouter (проверьте ключ и доступ к openrouter.ai).'];
+        } else {
+            foreach ((array) ($cfg_live['AVAILABLE_MODELS'] ?? []) as $mdl) {
+                if (($mdl['provider'] ?? '') !== $prov || !empty($mdl['ocr_only'])) continue;
+                // OpenRouter отдаёт весь каталог одним GET — сверяем слаги.
+                // У Яндекса такого списка нет, поэтому пингуем каждую модель.
+                $err = $prov === 'openrouter'
+                    ? (in_array((string) $mdl['full_id'], $catalog, true) ? null : 'нет в каталоге OpenRouter')
+                    : LLM::probeModel($mdl);
+                $rows[] = ['label' => (string) $mdl['label'], 'id' => (string) $mdl['id'], 'full_id' => (string) $mdl['full_id'], 'error' => $err];
+            }
+            $ok = count(array_filter($rows, static fn ($r) => $r['error'] === null));
+            $probe = ['provider' => $prov, 'rows' => $rows];
+            $messages[] = ['ok' => $ok > 0, 'text' => 'Проверка ' . $prov . ': доступно ' . $ok . ' из ' . count($rows) . '.'];
+        }
+    } elseif (isset($_POST['smtp_test'])) {
         // Test letter via the CURRENT saved settings (re-read overlay).
         $cfg_live = require __DIR__ . '/lib/config.php';
         $test_to = trim((string) ($_POST['smtp_test_to'] ?? '')) ?: (string) ($cfg_live['ADMIN_EMAIL'] ?? '');
@@ -178,6 +216,11 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
   .msg.ok { border-color: #1f6f4f; } .msg.bad { border-color: #ff4560; }
   .row { display: flex; gap: 12px; } .row > * { flex: 1; }
   a { color: #00d4e8; }
+  .probe { border: 1px solid #1f2735; margin: 10px 0 16px; max-height: 320px; overflow: auto; font-size: 13px; }
+  .probe-row { display: flex; gap: 10px; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #161d2a; }
+  .probe-row:last-child { border-bottom: 0; }
+  .probe-row.bad { color: #9fb0c8; } .probe-row em { color: #ff8a97; font-style: normal; text-align: right; }
+  .probe code { color: #00d4e8; }
 </style></head><body>
 <h1>4neuropro — настройки <a href="?logout=1" style="font-size:13px;float:right">выйти</a></h1>
 <p class="lede">Заполните только нужные поля — пустые значения не перезаписывают существующие. Значения сразу применяются ко всему сервису (overlay через таблицу <code>settings</code>).</p>
@@ -205,15 +248,42 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
     </label>
   </div>
   <label><span>Модель по умолчанию (из AVAILABLE_MODELS)</span>
-    <?php $model_cur = $eff('LLM_DEFAULT_MODEL'); $models = (array) ($cfg['AVAILABLE_MODELS'] ?? []); ?>
+    <?php
+    $model_cur = $eff('LLM_DEFAULT_MODEL');
+    $groups = LLM::modelsByGroup($cfg);
+    // Цена справочная: ₽ за 1 млн токенов (вход/выход), 0 — неизвестна.
+    $price = static function (array $m): string {
+        $in = (float) ($m['price_in'] ?? 0); $out = (float) ($m['price_out'] ?? 0);
+        return ($in > 0 || $out > 0) ? sprintf(' · ~%s/%s ₽ за 1M', rtrim(rtrim(number_format($in, 1, '.', ''), '0'), '.'), rtrim(rtrim(number_format($out, 1, '.', ''), '0'), '.')) : '';
+    };
+    ?>
     <select name="LLM_DEFAULT_MODEL">
-      <?php foreach ($models as $mdl): if (!empty($mdl['ocr_only'])) continue; ?>
-        <option value="<?= $h($mdl['id']) ?>" <?= $model_cur === $mdl['id'] ? 'selected' : '' ?>>
-          <?= $h($mdl['label']) ?> — <?= $h($mdl['provider']) ?>/<?= $h($mdl['full_id']) ?>
-        </option>
+      <?php foreach ($groups as $gname => $grows): ?>
+        <optgroup label="<?= $h((string) $gname) ?>">
+          <?php foreach ($grows as $mdl): ?>
+            <option value="<?= $h($mdl['id']) ?>" <?= $model_cur === $mdl['id'] ? 'selected' : '' ?>>
+              <?= $h($mdl['label']) ?> — <?= $h($mdl['full_id']) ?><?= $h($price($mdl)) ?>
+            </option>
+          <?php endforeach; ?>
+        </optgroup>
       <?php endforeach; ?>
     </select>
   </label>
+  <p class="lede" style="margin:-4px 0 8px">Каталог общий для всех установок. Что реально доступно вашему ключу — покажет проверка ниже; недоступная модель не ломает работу, запрос уходит следующему кандидату цепочки.</p>
+  <div class="row">
+    <button type="submit" name="models_probe" value="yandex" formnovalidate>Проверить каталог Yandex</button>
+    <button type="submit" name="models_probe" value="openrouter" formnovalidate>Проверить каталог OpenRouter</button>
+  </div>
+  <?php if ($probe !== null): ?>
+    <div class="probe">
+      <?php foreach ($probe['rows'] as $r): ?>
+        <div class="probe-row <?= $r['error'] === null ? 'good' : 'bad' ?>">
+          <span><?= $r['error'] === null ? '✅' : '⛔' ?> <?= $h($r['label']) ?> <code><?= $h($r['id']) ?></code></span>
+          <?php if ($r['error'] !== null): ?><em><?= $h(mb_substr($r['error'], 0, 160)) ?></em><?php endif; ?>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  <?php endif; ?>
   <label><span>Запасные модели (короткие id через запятую; пробуются после выбранной)</span><input type="text" name="LLM_FALLBACK_MODELS" placeholder="<?= $h($eff('LLM_FALLBACK_MODELS') ?: 'yandexgpt-lite,deepseek-v3') ?>"></label>
   <label><span>Vision-модель для PDF OCR (OpenRouter full_id)</span><input type="text" name="LLM_VISION_MODEL" placeholder="<?= $h($eff('LLM_VISION_MODEL') ?: 'google/gemini-2.0-flash-001') ?>"></label>
   <label><span>OpenRouter fallback-модель</span><input type="text" name="LLM_FALLBACK_MODEL" placeholder="<?= $h($eff('LLM_FALLBACK_MODEL') ?: 'openrouter/auto') ?>"></label>

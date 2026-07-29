@@ -283,15 +283,17 @@ function view_prompt_edit(array $cfg, callable $h): void {
     if (!$fam) { throw new RuntimeException('Семейство промптов не найдено'); }
     $v = isset($_GET['v']) ? Prompts::version((int)$_GET['v']) : null;
     $body = $v['body'] ?? '';
-    $models = array_filter($cfg['AVAILABLE_MODELS'] ?? [], fn ($m) => empty($m['ocr_only']));
+    $groups = LLM::modelsByGroup($cfg);
     ob_start(); ?>
     <h1><?= $h($fam['name']) ?></h1>
     <p class="muted">Сохранение создаёт новую версию (история сохраняется). <?= $v ? 'Открыта v'.$h($v['version_no']) : '' ?></p>
     <form method="post" action="?p=prompt_edit" class="card">
       <input type="hidden" name="id" value="<?= $famId ?>">
       <label><span>Нейросеть для интерпретации</span>
-        <select name="model_id"><?php foreach ($models as $m): ?>
-          <option value="<?= $h($m['id']) ?>" data-prov="<?= $h($m['provider']) ?>" <?= ($v['model_id'] ?? '')===$m['id']?'selected':'' ?>><?= $h($m['label']) ?> — <?= $h($m['provider']) ?></option>
+        <select name="model_id"><?php foreach ($groups as $gname => $grows): ?>
+          <optgroup label="<?= $h((string)$gname) ?>"><?php foreach ($grows as $m): ?>
+            <option value="<?= $h($m['id']) ?>" data-prov="<?= $h($m['provider']) ?>" <?= ($v['model_id'] ?? '')===$m['id']?'selected':'' ?>><?= $h($m['label']) ?> — <?= $h($m['full_id']) ?></option>
+          <?php endforeach; ?></optgroup>
         <?php endforeach; ?></select></label>
       <input type="hidden" name="provider" id="prov" value="<?= $h($v['provider'] ?? 'yandex') ?>">
       <label><span>Комментарий к версии (для себя)</span>

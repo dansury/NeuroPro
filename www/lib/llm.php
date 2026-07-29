@@ -83,6 +83,57 @@ final class LLM {
         return null;
     }
 
+    /** Чат-модели каталога, сгруппированные по `group` — для <optgroup> в UI.
+     *  $cfg можно передать снаружи (setup.php читает конфиг сам, без init()). */
+    public static function modelsByGroup(?array $cfg = null): array {
+        $rows = ($cfg ?? self::cfg())['AVAILABLE_MODELS'] ?? [];
+        $out = [];
+        foreach ($rows as $r) {
+            if (!empty($r['ocr_only'])) continue;
+            $out[(string) ($r['group'] ?? 'Модели')][] = $r;
+        }
+        return $out;
+    }
+
+    /** Доступна ли строка каталога у своего провайдера: минимальный запрос БЕЗ
+     *  fallback-цепочки. NULL — модель ответила, иначе текст ошибки провайдера
+     *  (у Яндекса неподключённая модель даёт HTTP 400 «Failed to get model»). */
+    public static function probeModel(array $row): ?string {
+        try {
+            self::http($row, [['role' => 'user', 'content' => 'ping']], 0.0, false, ['max_tokens' => 1]);
+            return null; // важен сам факт HTTP 200: пустой ответ при max_tokens=1 — норма
+        } catch (Throwable $e) {
+            return $e->getMessage();
+        }
+    }
+
+    /** Слаги моделей, которые OpenRouter отдаёт ключу (GET /models).
+     *  Пустой массив — список получить не удалось (нет ключа, сеть, HTTP-ошибка). */
+    public static function openRouterCatalog(): array {
+        $cfg = self::cfg();
+        $url = preg_replace('~/chat/completions$~', '/models', (string) ($cfg['OPENROUTER_URL'] ?? ''));
+        if (!is_string($url) || $url === '') return [];
+        $headers = ['Content-Type: application/json'];
+        if (!empty($cfg['OPENROUTER_API_KEY'])) $headers[] = 'Authorization: Bearer ' . $cfg['OPENROUTER_API_KEY'];
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => (int) ($cfg['LLM_TIMEOUT_SEC'] ?? 120),
+            CURLOPT_CONNECTTIMEOUT => 15,
+        ]);
+        $out = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($out === false || $code >= 400) return [];
+        $j = json_decode((string) $out, true);
+        $ids = [];
+        foreach ($j['data'] ?? [] as $m) {
+            if (!empty($m['id'])) $ids[] = (string) $m['id'];
+        }
+        return $ids;
+    }
+
     /** Логическое «семейство» модели для fallback между провайдерами: строки с
      *  явным `family` (yandex `deepseek-r1` и openrouter `deepseek/deepseek-r1`)
      *  считаются одной моделью; иначе семейство — это короткий id. */

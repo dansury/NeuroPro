@@ -85,6 +85,8 @@
 www/                  # ← веб-корень; ровно это зеркалится на прод через pull.php
   lib/
     config.php        # .env + ENV + overlay настроек из таблицы settings
+                      #   AVAILABLE_MODELS — общий каталог моделей (Yandex AI Studio
+                      #   + OpenRouter), сгруппированный по `group` для UI
     db.php            # SQLite-схема: profiles, prompts, prompt_versions, interpretations
     excel.php         # Чтение .xls (OLE2+BIFF8) / .xlsx / .csv — чистый PHP
     profile.php       # Грид Excel → структурный профиль (метаданные, баллы шкал, тип теста: СМУ/ИЖС/Басса-Дарки)
