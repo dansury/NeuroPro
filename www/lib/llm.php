@@ -1,14 +1,15 @@
 <?php
 /**
- * LLM provider wrapper — OpenRouter + Yandex Foundation Models.
+ * LLM provider wrapper — Yandex Foundation Models (по умолчанию) + OpenRouter.
  * (Extracted from resume-index/llm.php; report-specific logic removed.)
  *
  * Features:
- *  - Two providers behind one interface: OpenRouter (Bearer) and Yandex
- *    (Api-Key + folder, gpt:// model URIs, OpenAI-compatible endpoint).
+ *  - Two providers behind one interface: Yandex (Api-Key + folder, gpt:// model
+ *    URIs, OpenAI-compatible endpoint) and OpenRouter (Bearer).
  *  - Per-session model / provider overrides (LLM::setModelOverride / setProviderOverride).
- *  - Config-driven provider fallback chain (LLM_PROVIDER_PRIORITY) with
- *    automatic retry on the next provider's fallback model.
+ *  - Config-driven fallback chain: выбранная модель у каждого провайдера
+ *    (LLM_PROVIDER_PRIORITY), затем LLM_FALLBACK_MODELS — тоже по провайдерам.
+ *    Слаг модели никогда не уходит чужому провайдеру.
  *  - PDF OCR via OpenRouter vision models (file-parser plugin strategies +
  *    native) and Yandex Vision OCR, in operator-chosen priority order.
  *  - Generic chat entry points: chatText() and chatJson().
@@ -48,14 +49,16 @@ final class LLM {
 
     public static function effectiveProvider(): string {
         if (self::$providerOverride !== null) return self::$providerOverride;
-        return self::cfg()['LLM_PROVIDER'] ?? 'openrouter';
+        return self::cfg()['LLM_PROVIDER'] ?? 'yandex';
     }
 
     /** Ordered provider fallback list from LLM_PROVIDER_PRIORITY. Validates against
-     *  known providers, dedupes, and guarantees both appear so a leg is never dropped. */
+     *  known providers, dedupes, and guarantees both appear so a leg is never dropped.
+     *  Явный per-session override (провайдер версии промпта) поднимается в начало:
+     *  выбор оператора выигрывает первую попытку, остальные ноги — в порядке конфига. */
     private static function providerPriority(): array {
-        $known = ['openrouter', 'yandex'];
-        $raw = (string) (self::cfg()['LLM_PROVIDER_PRIORITY'] ?? 'openrouter,yandex');
+        $known = ['yandex', 'openrouter'];
+        $raw = (string) (self::cfg()['LLM_PROVIDER_PRIORITY'] ?? 'yandex,openrouter');
         $list = [];
         foreach (explode(',', $raw) as $p) {
             $p = strtolower(trim($p));
@@ -64,6 +67,10 @@ final class LLM {
         if (!$list) $list = $known;
         foreach ($known as $p) {
             if (!in_array($p, $list, true)) $list[] = $p;
+        }
+        if (self::$providerOverride !== null && in_array(self::$providerOverride, $list, true)) {
+            $ov = self::$providerOverride;
+            $list = array_merge([$ov], array_values(array_filter($list, static fn ($p) => $p !== $ov)));
         }
         return $list;
     }
@@ -76,26 +83,133 @@ final class LLM {
         return null;
     }
 
-    /** Resolve the active model for the current request, honoring provider override. */
+    /** Логическое «семейство» модели для fallback между провайдерами: строки с
+     *  явным `family` (yandex `deepseek-r1` и openrouter `deepseek/deepseek-r1`)
+     *  считаются одной моделью; иначе семейство — это короткий id. */
+    private static function modelFamily(array $row): string {
+        $fam = trim((string) ($row['family'] ?? ''));
+        if ($fam !== '') return $fam;
+        return (string) ($row['id'] ?? $row['full_id'] ?? '');
+    }
+
+    /** Чат-строки семейства, по провайдерам. OCR-модели исключены. */
+    private static function familyRows(string $family): array {
+        $out = [];
+        foreach ((self::cfg()['AVAILABLE_MODELS'] ?? []) as $r) {
+            if (!empty($r['ocr_only'])) continue;
+            if (self::modelFamily($r) === $family) $out[(string) ($r['provider'] ?? '')] = $r;
+        }
+        return $out;
+    }
+
+    /** Семейства запасных моделей из LLM_FALLBACK_MODELS (короткие id). */
+    private static function fallbackFamilies(): array {
+        $raw = (string) (self::cfg()['LLM_FALLBACK_MODELS'] ?? '');
+        $out = [];
+        foreach (explode(',', $raw) as $m) {
+            $m = trim($m);
+            if ($m === '') continue;
+            $row = self::findModel($m);
+            $fam = $row !== null ? self::modelFamily($row) : $m;
+            if (!in_array($fam, $out, true)) $out[] = $fam;
+        }
+        return $out;
+    }
+
+    /**
+     * Упорядоченный список моделей для dispatch(): сначала ВЫБРАННАЯ модель у
+     * каждого провайдера (в порядке LLM_PROVIDER_PRIORITY), затем каждая модель
+     * из LLM_FALLBACK_MODELS — тоже по всем провайдерам, и в конце «legacy»
+     * пофайловые fallback-модели как страховка. Провайдеры без ключей
+     * пропускаются, пары провайдер+модель дедуплицируются.
+     *
+     * Ключевое: слаг НИКОГДА не переносится на чужого провайдера. Раньше
+     * openrouter-модель с провайдером, переписанным на yandex, уходила в
+     * `gpt://<folder>/google/gemini-2.0-flash-001/latest` — это и давало
+     * `YANDEX HTTP 400: Failed to get model`.
+     */
+    private static function candidateChain(array $primary): array {
+        $cfg = self::cfg();
+        $hasOR = !empty($cfg['OPENROUTER_API_KEY']);
+        $hasYA = !empty($cfg['YANDEX_API_KEY']) && !empty($cfg['YANDEX_FOLDER_ID']);
+        $providers = self::providerPriority();
+        $primaryFamily = self::modelFamily($primary);
+
+        $families = [$primaryFamily];
+        foreach (self::fallbackFamilies() as $fam) {
+            if (!in_array($fam, $families, true)) $families[] = $fam;
+        }
+
+        $out = [];
+        $seen = [];
+        $push = static function (?array $row) use (&$out, &$seen): void {
+            if ($row === null) return;
+            $key = ($row['provider'] ?? '?') . '|' . ($row['full_id'] ?? '?');
+            if (isset($seen[$key])) return;
+            $seen[$key] = true;
+            $out[] = $row;
+        };
+        foreach ($families as $fam) {
+            $rows = self::familyRows($fam);
+            foreach ($providers as $prov) {
+                if ($prov === 'openrouter' && !$hasOR) continue;
+                if ($prov === 'yandex' && !$hasYA) continue;
+                if ($fam === $primaryFamily && ($primary['provider'] ?? '') === $prov) {
+                    $push($primary);                 // ровно выбранная строка у своего провайдера
+                    continue;
+                }
+                if (isset($rows[$prov])) { $push($rows[$prov]); continue; }
+                // Строки для этого провайдера нет. Синтезируем только Yandex-строку
+                // и только для семейства, которого нет в каталоге вовсе (оператор
+                // вписал слаг Yandex руками — тогда семейство и есть full_id).
+                // Известную модель, которой просто нет у Яндекса, пропускаем,
+                // а не превращаем в заведомо провальный запрос.
+                if ($prov === 'yandex' && !$rows) {
+                    $push(['provider' => 'yandex', 'full_id' => $fam, 'id' => $fam, 'label' => $fam, 'family' => $fam]);
+                }
+            }
+        }
+        // Страховка: пофайловые fallback-модели — цепочка не пустует даже при
+        // кривом LLM_FALLBACK_MODELS.
+        $legacy = [
+            'openrouter' => (string) ($cfg['LLM_FALLBACK_MODEL'] ?? 'openrouter/auto'),
+            'yandex'     => (string) ($cfg['YANDEX_FALLBACK_MODEL'] ?? 'yandexgpt'),
+        ];
+        foreach ($providers as $prov) {
+            if ($prov === 'openrouter' && !$hasOR) continue;
+            if ($prov === 'yandex' && !$hasYA) continue;
+            $fb = $legacy[$prov] ?? '';
+            if ($fb === '') continue;
+            $push(['provider' => $prov, 'full_id' => $fb, 'id' => 'fallback_' . $prov, 'label' => 'fallback_' . $prov]);
+        }
+        return $out ?: [$primary];
+    }
+
+    /** Resolve the active model for the current request, honoring provider override.
+     *  Провайдер строки никогда не подменяется без пересчёта full_id: если у
+     *  выбранного провайдера этой модели нет, остаётся «родная» строка, а
+     *  candidateChain() уже разложит попытки по провайдерам корректно. */
     private static function activeModel(): array {
-        $shortId = self::$modelOverride ?: (self::cfg()['LLM_DEFAULT_MODEL'] ?? 'deepseek-r1');
+        $shortId = self::$modelOverride ?: (self::cfg()['LLM_DEFAULT_MODEL'] ?? 'yandexgpt');
         $effective = self::effectiveProvider();
         $row = self::findModel($shortId);
         // OCR-only models (Yandex Vision OCR) are not chat models.
         if ($row !== null && !empty($row['ocr_only'])) $row = null;
-        if ($row !== null && self::$providerOverride !== null && ($row['provider'] ?? '') !== $effective) {
-            foreach ((self::cfg()['AVAILABLE_MODELS'] ?? []) as $r) {
-                if (($r['id'] ?? '') === $shortId && ($r['provider'] ?? '') === $effective) { $row = $r; break; }
-            }
+        if ($row !== null && ($row['provider'] ?? '') !== $effective) {
+            // Сиблинг того же семейства у запрошенного провайдера — со своим full_id.
+            $sibling = self::familyRows(self::modelFamily($row))[$effective] ?? null;
+            if ($sibling !== null) $row = $sibling;
         }
         if ($row !== null) return $row;
-        $default = self::findModel(self::cfg()['LLM_DEFAULT_MODEL'] ?? 'deepseek-r1');
+        $default = self::findModel(self::cfg()['LLM_DEFAULT_MODEL'] ?? 'yandexgpt');
         if ($default !== null) {
-            if (self::$providerOverride !== null && ($default['provider'] ?? '') !== $effective) {
-                $default['provider'] = $effective;
+            if (($default['provider'] ?? '') !== $effective) {
+                $sibling = self::familyRows(self::modelFamily($default))[$effective] ?? null;
+                if ($sibling !== null) $default = $sibling;
             }
             return $default;
         }
+        // Неизвестный id: считаем его слагом выбранного провайдера как есть.
         return [
             'id' => $shortId, 'label' => $shortId, 'provider' => $effective,
             'full_id' => $shortId, 'price_in' => 0.0, 'price_out' => 0.0,
@@ -297,18 +411,39 @@ final class LLM {
         return $text;
     }
 
-    /** One-shot (per request) email when OpenRouter failed and Yandex served the call. */
-    private static function notifyOpenRouterFallback(string $step, ?int $sessionId, string $usedModel, string $primaryError): void {
+    /** One-shot (per request) email when the primary provider failed and another
+     *  provider served the call. */
+    private static function notifyProviderFallback(string $step, ?int $sessionId, string $usedModel, string $primaryError, string $fromProvider, string $toProvider): void {
         static $notified = false;
         if ($notified || !class_exists('Mailer')) return;
         $notified = true;
+        $subject = strtoupper($fromProvider) . ' недоступен → fallback на ' . strtoupper($toProvider);
         try {
-            Mailer::sendErrorNotification(self::cfg(), 'OpenRouter недоступен → fallback на Yandex', $primaryError !== '' ? $primaryError : 'primary openrouter call failed', [
+            Mailer::sendErrorNotification(self::cfg(), $subject, $primaryError !== '' ? $primaryError : 'primary provider call failed', [
                 'step' => $step,
                 'session_id' => $sessionId ?? '—',
                 'used_model' => $usedModel,
             ]);
         } catch (Throwable $e) { /* never break the pipeline */ }
+    }
+
+    /**
+     * Убирает рассуждения reasoning-моделей (<think>…</think>) и markdown-ограждение.
+     * Без этого блок рассуждений попал бы прямо в текст интерпретации клиента, а
+     * при разборе JSON срез «первая `{` … последняя `}`» гарантированно ломался бы
+     * о собственные скобки внутри рассуждений.
+     */
+    private static function stripReasoning(string $raw): string {
+        $s = preg_replace('~<think\b[^>]*>.*?</think\s*>~isu', '', $raw) ?? $raw;
+        if (stripos($s, '</think') !== false) {
+            $s = preg_replace('~^.*</think\s*>~isu', '', $s) ?? $s;
+        }
+        $s = trim($s);
+        if (strncmp($s, '```', 3) === 0) {
+            $s = preg_replace('~^```[a-z]*[ \t]*\r?\n?~i', '', $s) ?? $s;
+            $s = preg_replace('~\r?\n?```\s*$~', '', $s) ?? $s;
+        }
+        return trim($s);
     }
 
     /* ──────────── Internals ──────────── */
@@ -463,56 +598,49 @@ final class LLM {
     }
 
     private static function dispatch(string $step, array $messages, ?int $sessionId, float $temp, bool $json): string {
-        $cfg = self::cfg();
         $primary = self::activeModel();
-        $primaryProvider = $primary['provider'] ?? 'openrouter';
-        // Config-driven fallback: walk providers in LLM_PROVIDER_PRIORITY order
-        // (primary first), appending each provider's fallback model.
-        $candidates = [$primary];
-        $hasOR = !empty($cfg['OPENROUTER_API_KEY']);
-        $hasYA = !empty($cfg['YANDEX_API_KEY']) && !empty($cfg['YANDEX_FOLDER_ID']);
-        $fallbackModels = [
-            'openrouter' => (string) ($cfg['LLM_FALLBACK_MODEL'] ?? 'openrouter/auto'),
-            'yandex'     => (string) ($cfg['YANDEX_FALLBACK_MODEL'] ?? 'deepseek-r1'),
-        ];
-        foreach (self::providerPriority() as $prov) {
-            if ($prov === 'openrouter' && !$hasOR) continue;
-            if ($prov === 'yandex' && !$hasYA) continue;
-            $fbModel = $fallbackModels[$prov] ?? '';
-            if ($fbModel === '') continue;
-            if ($prov === $primaryProvider && $fbModel === (string) ($primary['full_id'] ?? '')) continue;
-            $candidates[] = ['provider' => $prov, 'full_id' => $fbModel, 'id' => 'fallback_' . $prov, 'label' => 'fallback_' . $prov];
-        }
+        $primaryProvider = $primary['provider'] ?? 'yandex';
+        // Сначала выбранная модель у всех провайдеров, затем запасные модели —
+        // тоже у всех провайдеров, затем страховочные fallback-модели.
+        $candidates = self::candidateChain($primary);
         $lastError = null;
+        // По записи на каждую попытку (провайдер:модель): в тексте ошибки видна
+        // ВСЯ матрица fallback, а не только последняя нога — иначе неясно,
+        // отработал ли запасной провайдер вообще.
+        $errors = [];
         foreach ($candidates as $idx => $row) {
             $t0 = microtime(true);
-            $tag = $row['provider'] . ':' . $row['full_id'];
+            $tag = ($row['provider'] ?? '?') . ':' . ($row['full_id'] ?? '?');
             try {
                 $resp = self::http($row, $messages, $temp, $json);
                 $latency = (int) ((microtime(true) - $t0) * 1000);
                 if ($resp === null) {
                     $lastError = 'empty response';
+                    $errors[] = $tag . ': empty response';
                     self::logCall($sessionId, $step, $tag, $latency, 'empty', $lastError, null);
                     continue;
                 }
                 $content = self::extractContent($resp);
                 if (!is_string($content) || trim($content) === '') {
                     $lastError = 'no content field';
+                    $errors[] = $tag . ': no content field';
                     self::logCall($sessionId, $step, $tag, $latency, 'no_content', $lastError, json_encode($resp));
                     continue;
                 }
                 self::logCall($sessionId, $step, $tag, $latency, 'ok', null, $content);
-                if ($idx > 0 && $primaryProvider === 'openrouter' && ($row['provider'] ?? '') === 'yandex') {
-                    self::notifyOpenRouterFallback($step, $sessionId, $tag, (string) $lastError);
+                if ($idx > 0 && ($row['provider'] ?? '') !== $primaryProvider) {
+                    self::notifyProviderFallback($step, $sessionId, $tag, (string) $lastError, $primaryProvider, (string) ($row['provider'] ?? ''));
                 }
-                return $content;
+                // В лог кладём сырой ответ, наружу отдаём без рассуждений модели.
+                return self::stripReasoning($content);
             } catch (Throwable $e) {
                 $latency = (int) ((microtime(true) - $t0) * 1000);
                 $lastError = $e->getMessage();
+                $errors[] = $tag . ': ' . $e->getMessage();
                 self::logCall($sessionId, $step, $tag, $latency, 'exception', $lastError, null);
             }
         }
-        throw new RuntimeException("LLM $step failed: $lastError");
+        throw new RuntimeException("LLM $step failed: " . ($errors ? implode(' | ', $errors) : ($lastError ?? 'no candidates')));
     }
 
     /** $modelRow keys: provider, full_id. $extra is merged into the request body. */
@@ -584,9 +712,8 @@ final class LLM {
     }
 
     private static function parseJson(string $raw): ?array {
-        $raw = trim($raw);
-        $raw = preg_replace('/^```(?:json)?\s*/i', '', $raw);
-        $raw = preg_replace('/\s*```$/', '', $raw);
+        // Сначала срезаем рассуждения: их фигурные скобки ломают срез «{ … }».
+        $raw = self::stripReasoning($raw);
         $start = strpos($raw, '{');
         $end = strrpos($raw, '}');
         if ($start !== false && $end !== false && $end > $start) {
