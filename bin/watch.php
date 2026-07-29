@@ -4,9 +4,18 @@
  * auto-ingest each into a profile (status = awaiting_screenshot). The operator
  * then opens the dashboard, where the new profile is waiting for its screenshot.
  *
- * Кроссплатформенно: работает локально на Windows (см. watch.bat) и на *nix.
+ * ПОЧЕМУ bin/, а не www/: pull.php зеркалит на прод ровно содержимое www/, то
+ * есть всё, что лежит там, публично доступно по HTTP. Демон — локальный
+ * консольный процесс с бесконечным циклом: в вебе он бесполезен (запрос просто
+ * висел бы до таймаута) и вреден (любой мог бы его дёрнуть). Плюс наблюдаемая
+ * папка находится на машине оператора, а не на хостинге.
  *
- * Usage:  php bin/watch.php [intervalSeconds=5]
+ * Этот демон пишет в ЛОКАЛЬНУЮ базу (DB_PATH), поэтому годится, когда
+ * приложение поднято на той же машине (`php -S 127.0.0.1:8080 -t www`). Если
+ * рабочий сервис — на хостинге, оператору нужен www/tools/neuropro-watch.cmd:
+ * он отправляет файлы туда по HTTP и не требует PHP на машине оператора.
+ *
+ * Usage:  php bin/watch.php [интервал=5] [--dir=/путь] [--once]
  *
  * Идемпотентность: обработанные файлы фиксируются в БД по sha1, поэтому файл
  * подхватывается один раз. Частично записанные файлы (копирование/выгрузка ещё
@@ -55,21 +64,49 @@ function watch_open_browser(string $url): void {
 }
 
 $cfg = np_boot();
-$interval = max(2, (int) ($argv[1] ?? 5));
+
+// Аргументы: позиционный интервал (обратная совместимость) + ключи.
+$interval = 5;
+$dirArg = null;
+$once = false;
+foreach (array_slice($argv, 1) as $arg) {
+    if (str_starts_with($arg, '--dir=')) { $dirArg = substr($arg, 6); continue; }
+    if ($arg === '--once')               { $once = true;             continue; }
+    if (str_starts_with($arg, '--interval=')) { $interval = (int) substr($arg, 11); continue; }
+    if (ctype_digit($arg))               { $interval = (int) $arg;   continue; }
+    watch_err("[watch] ! Неизвестный аргумент: {$arg}\n");
+    watch_err("[watch]   Usage: php bin/watch.php [интервал=5] [--dir=/путь] [--once]\n");
+    exit(2);
+}
+$interval = max(2, $interval);
 // Нормализуем путь: убираем хвостовые слэши обоих видов (Windows: «C:\incoming\»).
-$dir = rtrim((string) $cfg['WATCH_DIR'], "/\\");
+$dir = rtrim($dirArg ?? (string) $cfg['WATCH_DIR'], "/\\");
 // URL приложения анализа: открываем в браузере при появлении нового файла.
 $appUrl = (string) ($cfg['APP_URL'] ?? '');
 
 if ($dir === '' || !is_dir($dir)) {
-    watch_err("[watch] ! Папка наблюдения не найдена: «{$dir}». Проверьте WATCH_DIR.\n");
+    watch_err("[watch] ! Папка наблюдения не найдена: «{$dir}».\n");
+    watch_err("[watch]   Задайте её ключом --dir=/путь или переменной WATCH_DIR.\n");
     exit(1);
 }
 
-watch_out("[watch] Наблюдаю за: {$dir} (каждые {$interval}с)\n");
+watch_out("[watch] ─────────────────────────────────────────────\n");
+watch_out("[watch] Папка отслеживается: {$dir}\n");
+watch_out("[watch] Опрос: каждые {$interval}с (.xls, .xlsx)\n");
+watch_out("[watch] База профилей: {$cfg['DB_PATH']}\n");
 if ($appUrl !== '') {
     watch_out("[watch] При новом файле открою: {$appUrl}\n");
 }
+// Профили этот демон кладёт в локальную БД. Если APP_URL смотрит на чужой хост,
+// оператор их там не увидит — предупреждаем сразу, а не после первой выгрузки.
+$appHost = strtolower((string) parse_url($appUrl, PHP_URL_HOST));
+if ($appHost !== '' && !in_array($appHost, ['localhost', '127.0.0.1', '::1'], true)) {
+    watch_out("[watch] ⚠ APP_URL ведёт на {$appHost}, а профили пишутся в локальную БД —\n");
+    watch_out("[watch]   там их не будет. Для работы с хостингом используйте\n");
+    watch_out("[watch]   www/tools/neuropro-watch.cmd (отправляет файлы на сервер по HTTP).\n");
+}
+watch_out("[watch] ─────────────────────────────────────────────\n");
+watch_out($once ? "[watch] Режим одного прохода (--once).\n" : "[watch] Остановить: Ctrl+C.\n");
 
 Db::pdo()->exec("CREATE TABLE IF NOT EXISTS watch_seen (hash TEXT PRIMARY KEY, path TEXT, profile_id INTEGER, seen_at TEXT DEFAULT (datetime('now')))");
 
@@ -97,7 +134,8 @@ while (true) {
         $sig = $size . '|' . $mtime;
 
         // Файл готов, только если его сигнатура совпала с прошлым опросом.
-        if (($pending[$file] ?? null) === $sig) {
+        // В режиме --once второго опроса не будет — берём всё как есть.
+        if ($once || ($pending[$file] ?? null) === $sig) {
             $stable[$file] = true;
         } else {
             $pending[$file] = $sig;
@@ -137,6 +175,11 @@ while (true) {
     // Подчищаем из pending пути исчезнувших файлов, чтобы карта не росла.
     foreach (array_keys($pending) as $p) {
         if (!is_file($p)) unset($pending[$p]);
+    }
+
+    if ($once) {
+        watch_out("[watch] Проход завершён: новых профилей — {$ingested}.\n");
+        break;
     }
 
     sleep($interval);

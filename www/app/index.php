@@ -83,6 +83,15 @@ function view_upload(array $cfg, callable $h): void {
         <input type="text" name="methodic" placeholder="Структура мотивации участия (СМУ)"></label>
       <button class="btn" type="submit">Загрузить</button>
     </form>
+    <div class="card">
+      <h2>Не загружать вручную</h2>
+      <p class="muted">Наблюдатель папки для Windows: положите файл в ту папку, куда Эгоскоп
+         сохраняет выгрузки, и запустите один раз. Он сам пропишется в автозагрузку и дальше
+         будет отправлять сюда каждый новый <code>.xls</code>, открывая профиль в браузере.</p>
+      <p><a class="btn" href="/tools/neuropro-watch.cmd" download>⤓ Скачать наблюдатель папки (Windows)</a></p>
+      <p class="muted">Отслеживаемые папки и снятие с автозапуска — ключи <code>/status</code> и
+         <code>/stop</code> у того же файла. PHP на компьютере оператора не нужен.</p>
+    </div>
     <?php
     layout('Загрузка', ob_get_clean(), $h);
 }

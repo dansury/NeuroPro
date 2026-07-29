@@ -1,0 +1,5 @@
+# Раздаём инструменты оператора как обычные файлы для скачивания: сервер их не
+# исполняет, браузер получает Content-Type для «Сохранить как…».
+<IfModule mod_mime.c>
+    AddType application/octet-stream .cmd
+</IfModule>
