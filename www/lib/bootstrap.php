@@ -29,7 +29,7 @@ function np_boot(): array {
     $store = new SettingsStore($cfg['DB_PATH']);
     LLM::init($cfg, $store);
 
-    np_seed_prompts();
+    np_seed_prompts($cfg);
     return $cfg;
 }
 
@@ -71,13 +71,37 @@ function np_prompt_v1_body(string $key): string {
 }
 
 /** Seed СМУ + LSI + Басса-Дарки prompt families from the bundled source prompt files. */
-function np_seed_prompts(): void {
+function np_seed_prompts(array $cfg = []): void {
+    $model = (string) ($cfg['LLM_DEFAULT_MODEL'] ?? 'yandexgpt');
+    $provider = (string) ($cfg['LLM_PROVIDER'] ?? 'yandex');
     foreach (np_prompt_families() as $key => $fam) {
         if (Prompts::family($key)) continue;
-        Prompts::seed($key, $fam['name'], np_prompt_v1_body($key), 'deepseek-r1', 'yandex');
+        Prompts::seed($key, $fam['name'], np_prompt_v1_body($key), $model, $provider);
     }
     np_heal_stub_prompts();
-    np_seed_prompts_v2();
+    np_seed_prompts_v2($model, $provider);
+    np_heal_seeded_models($model, $provider);
+}
+
+/**
+ * Переводит АВТОСИДИРОВАННЫЕ версии на модель/провайдера из конфига. Раньше
+ * модель была зашита в код (`deepseek-r1` / `deepseek-v3`), и если открытые
+ * модели в каталоге Яндекса не подключены, каждый прогон начинался с
+ * `YANDEX HTTP 400: Failed to get model`. Правим только служебные версии
+ * (по маркеру-комментарию) и только пока по ним нет интерпретаций — ручной
+ * выбор оператора и история не трогаются.
+ */
+function np_heal_seeded_models(string $model, string $provider): void {
+    $legacy = ['deepseek-r1', 'deepseek-v3'];
+    if (in_array($model, $legacy, true)) return;   // оператор сам выбрал такую модель
+    $rows = Db::all(
+        'SELECT id, model_id FROM prompt_versions WHERE comment IN (?, ?) AND model_id IN (?, ?)',
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, $legacy[0], $legacy[1]]
+    );
+    foreach ($rows as $row) {
+        if (Prompts::interpCount((int) $row['id']) > 0) continue;
+        Db::q('UPDATE prompt_versions SET model_id = ?, provider = ? WHERE id = ?', [$model, $provider, (int) $row['id']]);
+    }
 }
 
 /**
@@ -112,7 +136,7 @@ function np_heal_stub_prompts(): void {
  * v2 становится активной, только если оператор ещё не трогал семейство
  * (активна нетронутая автосидированная v1) — ручной выбор версии не перебиваем.
  */
-function np_seed_prompts_v2(): void {
+function np_seed_prompts_v2(string $model = 'yandexgpt', string $provider = 'yandex'): void {
     $v2 = ['smu' => 'smu_v2.php', 'lsi' => 'lsi_v2.php', 'bd' => 'bd_v2.php'];
     foreach ($v2 as $key => $file) {
         $fam = Prompts::family($key);
@@ -123,7 +147,7 @@ function np_seed_prompts_v2(): void {
         if (!is_file($path)) continue;
         $body = trim((string) require $path);
         if ($body === '') continue;
-        $versionId = Prompts::addVersion($promptId, $body, 'deepseek-v3', 'yandex', NP_PROMPT_V2_COMMENT);
+        $versionId = Prompts::addVersion($promptId, $body, $model, $provider, NP_PROMPT_V2_COMMENT);
         $active = $fam['active_version_id'] ? Prompts::version((int) $fam['active_version_id']) : null;
         if ($active === null || ((int) $active['version_no'] === 1 && ($active['comment'] ?? '') === NP_PROMPT_V1_COMMENT)) {
             Prompts::setActive($promptId, $versionId);

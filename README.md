@@ -52,6 +52,21 @@ PHP берётся из `PATH` (`php.exe`) либо из переменной о
 Секреты — через `.env` или `setup.php` (`OPENROUTER_API_KEY`, `YANDEX_API_KEY`,
 `YANDEX_FOLDER_ID`, SMTP‑параметры, `ADMIN_PASSWORD`, `WATCH_DIR`, `BRAND_*`).
 
+**Нейросеть по умолчанию — Яндекс** (`LLM_PROVIDER=yandex`, модель `yandexgpt`),
+поэтому для работы достаточно `YANDEX_API_KEY` + `YANDEX_FOLDER_ID`: тем же
+ключом работает и Vision OCR скриншота значимости. OpenRouter подключается
+запасным вариантом, если задан `OPENROUTER_API_KEY`.
+
+Если модель не отвечает, `LLM::dispatch()` пробует её же у второго провайдера
+(`LLM_PROVIDER_PRIORITY`), затем модели из `LLM_FALLBACK_MODELS`. Слаг модели
+никогда не отправляется чужому провайдеру: раньше openrouter‑модель, у которой
+провайдер переписывался на Яндекс, уходила как
+`gpt://<folder>/google/gemini-2.0-flash-001/latest` и получала
+`YANDEX HTTP 400: Failed to get model`. Открытые модели каталога
+(`deepseek-*`, `qwen3-*`, `gemma-*`) дают ту же ошибку, если они не подключены
+в вашем каталоге Yandex Cloud — первопартийные `yandexgpt` / `yandexgpt-lite`
+доступны всегда.
+
 **Куда класть `.env`:** над веб-корнем, рядом с каталогом `data/`
 (локально — корень репозитория, на хостинге — каталог над корнем сайта).
 Шаблон — `.env.example`; порядок приоритета: настройки в `setup.php` →

@@ -15,7 +15,7 @@ require_once __DIR__ . '/db.php';
 
 final class Prompts {
     /** Ensure a prompt family exists for each known test, seeded from a file. */
-    public static function seed(string $testKey, string $name, string $body, string $defaultModel = 'deepseek-r1', string $provider = 'yandex'): int {
+    public static function seed(string $testKey, string $name, string $body, string $defaultModel = 'yandexgpt', string $provider = 'yandex'): int {
         $existing = Db::one('SELECT id FROM prompts WHERE test_key = ?', [$testKey]);
         if ($existing) return (int) $existing['id'];
         $promptId = Db::insert('INSERT INTO prompts (test_key, name) VALUES (?, ?)', [$testKey, $name]);

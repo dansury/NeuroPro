@@ -28,10 +28,20 @@ final class Db {
     }
 
     private static function migrate(PDO $pdo): void {
+        // Схема должна совпадать с SettingsStore: кто из них инициализирует БД
+        // первым, тот и создаёт таблицу, а `CREATE TABLE IF NOT EXISTS` у второго
+        // молча ничего не делает. Без updated_at сохранение настроек в setup.php
+        // падало с «table settings has no column named updated_at».
         $pdo->exec("CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
+            key         TEXT PRIMARY KEY,
+            value       TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
         )");
+        // Догоняем БД, созданные старой схемой (без updated_at).
+        $cols = $pdo->query("PRAGMA table_info(settings)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if (!in_array('updated_at', $cols, true)) {
+            $pdo->exec("ALTER TABLE settings ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''");
+        }
 
         // A prompt family per test type (e.g. one for СМУ, one for LSI).
         $pdo->exec("CREATE TABLE IF NOT EXISTS prompts (

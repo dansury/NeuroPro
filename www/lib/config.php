@@ -79,6 +79,7 @@ if (!function_exists('cfg_settings_whitelist')) {
     function cfg_settings_whitelist(): array {
         return [
             'LLM_PROVIDER', 'LLM_DEFAULT_MODEL', 'LLM_PROVIDER_PRIORITY',
+            'LLM_FALLBACK_MODELS',
             'OPENROUTER_API_KEY', 'LLM_VISION_MODEL', 'LLM_FALLBACK_MODEL',
             'LLM_OCR_MODELS', 'YANDEX_FALLBACK_MODEL',
             'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'YANDEX_LLM_URL',
@@ -92,17 +93,27 @@ if (!function_exists('cfg_settings_whitelist')) {
 
 $config = [
     /* ── LLM provider switch ── */
-    'LLM_PROVIDER'          => cfg_env('LLM_PROVIDER', 'openrouter'),       // 'yandex' | 'openrouter'
-    'LLM_DEFAULT_MODEL'     => cfg_env('LLM_DEFAULT_MODEL', 'gemini-2.0-flash'),
-    // Comma-separated provider fallback order for LLM::dispatch(). Primary first.
-    'LLM_PROVIDER_PRIORITY' => cfg_env('LLM_PROVIDER_PRIORITY', 'openrouter,yandex'),
+    // Яндекс — провайдер по умолчанию: оплата в рублях, данные не покидают РФ,
+    // тем же ключом работает Vision OCR скриншота значимости.
+    'LLM_PROVIDER'          => cfg_env('LLM_PROVIDER', 'yandex'),           // 'yandex' | 'openrouter'
+    'LLM_DEFAULT_MODEL'     => cfg_env('LLM_DEFAULT_MODEL', 'yandexgpt'),
+    // Comma-separated provider fallback order for LLM::dispatch(). The CHOSEN
+    // model is tried on every provider in this order FIRST (Yandex, then
+    // OpenRouter), and only then dispatch moves on to LLM_FALLBACK_MODELS.
+    'LLM_PROVIDER_PRIORITY' => cfg_env('LLM_PROVIDER_PRIORITY', 'yandex,openrouter'),
+    // Другие модели (короткие id из AVAILABLE_MODELS), которые пробуются только
+    // после того, как выбранная модель не отработала ни у одного провайдера.
+    'LLM_FALLBACK_MODELS'   => cfg_env('LLM_FALLBACK_MODELS', 'yandexgpt-lite,deepseek-v3'),
 
     /* ── OpenRouter ── (supply key via ENV or setup.php) */
     'OPENROUTER_API_KEY'    => cfg_env('OPENROUTER_API_KEY', ''),
     'OPENROUTER_URL'        => 'https://openrouter.ai/api/v1/chat/completions',
     'LLM_VISION_MODEL'      => cfg_env('LLM_VISION_MODEL', 'google/gemini-2.0-flash-001'),
     'LLM_FALLBACK_MODEL'    => cfg_env('LLM_FALLBACK_MODEL', 'openrouter/auto'),
-    'YANDEX_FALLBACK_MODEL' => cfg_env('YANDEX_FALLBACK_MODEL', 'deepseek-r1'),
+    // Страховочная модель Яндекса: yandexgpt доступен в любом каталоге, тогда как
+    // открытые модели (deepseek-*, qwen3-*) в каталоге могут быть не подключены —
+    // такой слаг возвращает HTTP 400 «Failed to get model».
+    'YANDEX_FALLBACK_MODEL' => cfg_env('YANDEX_FALLBACK_MODEL', 'yandexgpt'),
     // OpenRouter model ids tried in order during PDF OCR; first non-empty wins.
     'LLM_OCR_MODELS'        => array_values(array_filter(array_map('trim', explode(',', (string) cfg_env(
         'LLM_OCR_MODELS',
@@ -154,10 +165,12 @@ $config = [
     'YANDEX_OCR_IMAGE_MODEL' => cfg_env('YANDEX_OCR_IMAGE_MODEL', 'page'),
 
     /* ── Available models (chat + OCR). price_in/price_out: RUB per 1k tokens (approx).
-       Yandex `full_id` is the slug used in gpt://<folder>/<full_id>/latest. ── */
+       Yandex `full_id` is the slug used in gpt://<folder>/<full_id>/latest.
+       `family` связывает одну логическую модель у разных провайдеров: если она
+       не отвечает у Яндекса, LLM::dispatch() пробует её же у OpenRouter. ── */
     'AVAILABLE_MODELS'      => [
         // ── Yandex AI Studio — first-party ──
-        ['id' => 'deepseek-r1',    'label' => 'DeepSeek R1',     'provider' => 'yandex',     'full_id' => 'deepseek-r1',    'price_in' => 1.20, 'price_out' => 1.20],
+        ['id' => 'deepseek-r1',    'label' => 'DeepSeek R1',     'provider' => 'yandex',     'full_id' => 'deepseek-r1',    'family' => 'deepseek-r1', 'price_in' => 1.20, 'price_out' => 1.20],
         ['id' => 'deepseek-v3',    'label' => 'DeepSeek V3',     'provider' => 'yandex',     'full_id' => 'deepseek-v3',    'price_in' => 0.50, 'price_out' => 0.50],
         ['id' => 'yandexgpt',      'label' => 'YandexGPT Pro',   'provider' => 'yandex',     'full_id' => 'yandexgpt',      'price_in' => 1.20, 'price_out' => 1.20],
         ['id' => 'yandexgpt-lite', 'label' => 'YandexGPT Lite',  'provider' => 'yandex',     'full_id' => 'yandexgpt-lite', 'price_in' => 0.20, 'price_out' => 0.20],
@@ -167,7 +180,7 @@ $config = [
         // ── Yandex Vision OCR (PDF text recognition, not a chat model) ──
         ['id' => 'yandex-vision-ocr', 'label' => 'Yandex Vision OCR (PDF)', 'provider' => 'yandex', 'full_id' => 'yandex-ocr-page', 'price_in' => 0.0, 'price_out' => 0.0, 'ocr_only' => true],
         // ── OpenRouter ──
-        ['id' => 'openrouter-deepseek-r1', 'label' => 'DeepSeek R1 (OpenRouter)', 'provider' => 'openrouter', 'full_id' => 'deepseek/deepseek-r1', 'price_in' => 50.0, 'price_out' => 200.0],
+        ['id' => 'openrouter-deepseek-r1', 'label' => 'DeepSeek R1 (OpenRouter)', 'provider' => 'openrouter', 'full_id' => 'deepseek/deepseek-r1', 'family' => 'deepseek-r1', 'price_in' => 50.0, 'price_out' => 200.0],
         ['id' => 'gpt-4o',           'label' => 'GPT-4o (OpenRouter)',           'provider' => 'openrouter', 'full_id' => 'openai/gpt-4o',                'price_in' => 230.0, 'price_out' => 920.0],
         ['id' => 'gemini-2.0-flash', 'label' => 'Gemini 2.0 Flash (OpenRouter)', 'provider' => 'openrouter', 'full_id' => 'google/gemini-2.0-flash-001', 'price_in' => 9.0,   'price_out' => 36.0],
     ],
