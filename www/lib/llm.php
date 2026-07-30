@@ -403,6 +403,120 @@ final class LLM {
         return trim(implode("\n", $parts));
     }
 
+    /**
+     * Распознавание таблицы «смысло-эмоциональной значимости» ОТДЕЛЬНОЙ
+     * мультимодальной моделью, которая СМОТРИТ на скриншот, а не читает голый
+     * OCR-текст. Плоский OCR терял главное — положение графиков: у Эгоскопа
+     * «Знач.» — это отклонение столбика от центральной линии-медианы (влево —
+     * отрицательное, вправо — положительное, длина — величина), и по одному
+     * тексту нельзя понять, какой из числовых столбцов и с каким знаком является
+     * «Знач.». Модель сопоставляет направление графика с цифрами и выдаёт
+     * согласованную таблицу значений; математику по ней по-прежнему считает
+     * Metrics (Конституция, принцип I — модель ничего не интерпретирует).
+     *
+     * @param string $imageBytes  байты скриншота
+     * @param string $mime        image/png | image/jpeg | …
+     * @param array  $labels      подписи шкал профиля (задают порядок и состав)
+     * @return array{rows: array<int, array{label:string,zna:?float,p:?string,sig:bool,smk:string,ball:?float}>, raw:string}
+     */
+    public static function recognizeSignificance(string $imageBytes, string $mime, array $labels): array {
+        $cfg = self::cfg();
+        $dataUri = 'data:' . $mime . ';base64,' . base64_encode($imageBytes);
+        $list = '';
+        foreach (array_values($labels) as $i => $l) $list .= ($i + 1) . '. ' . $l . "\n";
+
+        $system = <<<SYS
+Ты — модуль распознавания таблицы «смысло-эмоциональная значимость» прибора «Эгоскоп».
+Твоя ЕДИНСТВЕННАЯ задача — точно прочитать скриншот и вернуть таблицу чисел. Ты НИЧЕГО не интерпретируешь и не пересчитываешь.
+
+Строение таблицы (слева направо):
+1) Название шкалы.
+2) Горизонтальный график-«ящик» с ЦЕНТРАЛЬНОЙ вертикальной линией — это МЕДИАНА (ноль).
+   • Столбик уходит ВПРАВО от линии → «Знач.» ПОЛОЖИТЕЛЬНОЕ (тело реагирует сильнее обычного).
+   • Столбик уходит ВЛЕВО от линии → «Знач.» ОТРИЦАТЕЛЬНОЕ.
+   • Чем длиннее столбик, тем больше модуль «Знач.». Синий/зелёный/жирный столбик — достоверное отклонение.
+3) Достоверность p (например «p>0.05», «p<0.05», «p<0.01»), часто выделена цветом при p<0.05.
+4) Столбец «СМК» — порядок доминирования параметров, например «Z>X>Y», «X*>Z>Y», «X>YZ» («*» = значительно).
+5) Один или несколько числовых столбцов. Среди них есть «Знач.» — число, ЗНАК и величина которого СОВПАДАЮТ с направлением и длиной графика. Первый числовой столбец обычно «Балл» (ответ теста).
+
+ГЛАВНОЕ ПРАВИЛО: знак «Знач.» бери ИЗ ГРАФИКА. Если столбик слева — «Знач.» отрицательное, даже если рядом стоит то же число без минуса. Выбирай тот числовой столбец, чей знак согласуется с графиком.
+
+Верни СТРОГО один JSON-объект без markdown:
+{"rows":[{"label":"<точное название шкалы>","zna":<число со знаком или null>,"p":"<строка вида \\"<0.05\\"/\\">0.05\\"/\\"<0.01\\" или null>","smk":"<токен СМК или пустая строка>","ball":<число или null>}]}
+Правила: числа — с точкой; если ячейка нечитаема — null; ничего не выдумывай. Порядок и названия строк — как в списке ожидаемых шкал ниже.
+SYS;
+
+        $user = [
+            ['type' => 'text', 'text' => "Ожидаемые шкалы (верни строки в этом порядке и с этими названиями):\n" . $list
+                . "\nПрочитай график каждой строки и верни JSON по схеме."],
+            ['type' => 'image_url', 'image_url' => ['url' => $dataUri]],
+        ];
+        $messages = [
+            ['role' => 'system', 'content' => $system],
+            ['role' => 'user', 'content' => $user],
+        ];
+
+        // Кандидаты: сначала выбранная модель распознавания, затем vision-модели
+        // из цепочки PDF-OCR — все у OpenRouter (у Яндекса нет мультимодального чата).
+        $candidates = [];
+        $sel = trim((string) ($cfg['SCREENSHOT_MODEL'] ?? ''));
+        if ($sel !== '') {
+            $row = self::findModel($sel);
+            $candidates[] = $row && ($row['provider'] ?? '') === 'openrouter'
+                ? ['provider' => 'openrouter', 'full_id' => $row['full_id']]
+                : ['provider' => 'openrouter', 'full_id' => $sel];
+        }
+        foreach (($cfg['LLM_OCR_MODELS'] ?? []) as $slug) {
+            $candidates[] = ['provider' => 'openrouter', 'full_id' => $slug];
+        }
+        if (empty($cfg['OPENROUTER_API_KEY'])) {
+            throw new RuntimeException('Распознавание скриншота недоступно: OPENROUTER_API_KEY пуст (vision-модель нужна для чтения графиков).');
+        }
+
+        $errors = [];
+        $seen = [];
+        foreach ($candidates as $row) {
+            $tag = $row['full_id'];
+            if ($tag === '' || isset($seen[$tag])) continue;
+            $seen[$tag] = true;
+            try {
+                $resp = self::http($row, $messages, 0.0, true);
+                $content = $resp ? self::extractContent($resp) : null;
+                if (!is_string($content) || trim($content) === '') { $errors[] = $tag . ': пустой ответ'; continue; }
+                $parsed = self::parseJson($content);
+                if (!is_array($parsed) || !isset($parsed['rows']) || !is_array($parsed['rows'])) {
+                    $errors[] = $tag . ': не JSON со «rows»'; continue;
+                }
+                error_log('[recognizeSignificance] via ' . $tag . ' (' . count($parsed['rows']) . ' строк)');
+                return ['rows' => self::normalizeSignRows($parsed['rows']), 'raw' => $content];
+            } catch (Throwable $e) {
+                $errors[] = $tag . ': ' . $e->getMessage();
+            }
+        }
+        throw new RuntimeException('Vision-распознавание скриншота не удалось: ' . implode(' | ', $errors));
+    }
+
+    /** Приводит строки vision-ответа к каноничному виду (числа, флаг достоверности). */
+    private static function normalizeSignRows(array $rows): array {
+        $out = [];
+        foreach ($rows as $r) {
+            if (!is_array($r)) continue;
+            $zna = $r['zna'] ?? null;
+            $ball = $r['ball'] ?? null;
+            $p = isset($r['p']) && $r['p'] !== null && $r['p'] !== '' ? (string) $r['p'] : null;
+            $sig = $p !== null && (bool) preg_match('/<\s*0?\.0[0-5]/', $p); // «<0.05»/«<0.01» → достоверно
+            $out[] = [
+                'label' => trim((string) ($r['label'] ?? '')),
+                'zna'   => is_numeric($zna) ? (float) $zna : null,
+                'p'     => $p,
+                'sig'   => $sig,
+                'smk'   => trim((string) ($r['smk'] ?? '')),
+                'ball'  => is_numeric($ball) ? (float) $ball : null,
+            ];
+        }
+        return $out;
+    }
+
     /** Yandex Vision OCR (recognizeText). Concatenates per-page fullText.
      *  Gated by YANDEX_OCR_ENABLED + creds. Returns null on any problem
      *  (appending a reason to &$errors), never throws. */

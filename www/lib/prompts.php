@@ -70,18 +70,62 @@ final class Prompts {
         return (int) ($r['c'] ?? 0);
     }
 
-    /** Delete a version — refused if any interpretation uses it or it's active. */
-    public static function deleteVersion(int $versionId): array {
+    /**
+     * Delete a version. По умолчанию бережно: отказ, если по версии есть
+     * интерпретации или она активна. С $force = true удаляет вместе с её
+     * интерпретациями и переносит «активную» на другую версию семейства (или
+     * очищает, если версий не осталось) — оператор явно подтвердил удаление.
+     */
+    public static function deleteVersion(int $versionId, bool $force = false): array {
         $v = self::version($versionId);
         if (!$v) return ['ok' => false, 'error' => 'Версия не найдена'];
-        if (self::interpCount($versionId) > 0) {
-            return ['ok' => false, 'error' => 'Нельзя удалить: по этой версии есть интерпретации'];
+        $famId = (int) $v['prompt_id'];
+        $fam = self::familyById($famId);
+        if (!$force) {
+            if (self::interpCount($versionId) > 0) {
+                return ['ok' => false, 'error' => 'Нельзя удалить: по этой версии есть интерпретации'];
+            }
+            if ($fam && (int) $fam['active_version_id'] === $versionId) {
+                return ['ok' => false, 'error' => 'Нельзя удалить активную версию — сначала выберите другую'];
+            }
         }
-        $fam = self::familyById((int) $v['prompt_id']);
-        if ($fam && (int) $fam['active_version_id'] === $versionId) {
-            return ['ok' => false, 'error' => 'Нельзя удалить активную версию — сначала выберите другую'];
+        Db::pdo()->beginTransaction();
+        try {
+            Db::q('DELETE FROM interpretations WHERE prompt_version_id = ?', [$versionId]);
+            if ($fam && (int) $fam['active_version_id'] === $versionId) {
+                $other = Db::one('SELECT id FROM prompt_versions WHERE prompt_id = ? AND id <> ? ORDER BY version_no DESC LIMIT 1',
+                    [$famId, $versionId]);
+                Db::q('UPDATE prompts SET active_version_id = ? WHERE id = ?', [$other['id'] ?? null, $famId]);
+            }
+            Db::q('DELETE FROM prompt_versions WHERE id = ?', [$versionId]);
+            Db::pdo()->commit();
+        } catch (Throwable $e) {
+            Db::pdo()->rollBack();
+            return ['ok' => false, 'error' => 'Не удалось удалить версию: ' . $e->getMessage()];
         }
-        Db::q('DELETE FROM prompt_versions WHERE id = ?', [$versionId]);
+        return ['ok' => true];
+    }
+
+    /**
+     * Delete an entire prompt family — все версии и их интерпретации. Заметь:
+     * bootstrap заново засеет семейство по известному тесту при следующем запуске
+     * (уже с чистой v1), поэтому это «сброс к исходному», а не безвозвратная
+     * потеря самой методики.
+     */
+    public static function deleteFamily(int $promptId): array {
+        $fam = self::familyById($promptId);
+        if (!$fam) return ['ok' => false, 'error' => 'Семейство не найдено'];
+        Db::pdo()->beginTransaction();
+        try {
+            Db::q('DELETE FROM interpretations WHERE prompt_version_id IN (SELECT id FROM prompt_versions WHERE prompt_id = ?)', [$promptId]);
+            Db::q('UPDATE prompts SET active_version_id = NULL WHERE id = ?', [$promptId]);
+            Db::q('DELETE FROM prompt_versions WHERE prompt_id = ?', [$promptId]);
+            Db::q('DELETE FROM prompts WHERE id = ?', [$promptId]);
+            Db::pdo()->commit();
+        } catch (Throwable $e) {
+            Db::pdo()->rollBack();
+            return ['ok' => false, 'error' => 'Не удалось удалить семейство: ' . $e->getMessage()];
+        }
         return ['ok' => true];
     }
 

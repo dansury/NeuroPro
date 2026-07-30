@@ -102,6 +102,14 @@ final class Db {
             $pdo->exec("ALTER TABLE interpretations ADD COLUMN edited_at TEXT");
         }
 
+        // Сам скриншот «смысло-эмоциональной значимости» (data URI): оператору
+        // нужно видеть исходную картинку рядом с распознанным расчётом, чтобы
+        // сверить цифры с положением графиков. Догоняем БД, созданные раньше.
+        $pcols = $pdo->query("PRAGMA table_info(profiles)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if ($pcols && !in_array('phys_image', $pcols, true)) {
+            $pdo->exec("ALTER TABLE profiles ADD COLUMN phys_image TEXT");
+        }
+
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_versions_prompt ON prompt_versions(prompt_id)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_interp_version ON interpretations(prompt_version_id)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_interp_profile ON interpretations(profile_id)");
