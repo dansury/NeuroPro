@@ -110,6 +110,57 @@ final class Interpret {
         return implode("\n", $lines);
     }
 
+    /**
+     * ВСЁ, ЧТО УХОДИТ В НЕЙРОСЕТЬ, одним текстом — для кнопки «скопировать
+     * промпт и данные» рядом с кнопкой интерпретации.
+     *
+     * Оператор проверяет промпты и подбирает формулировки в чужом чате (или
+     * просто хочет видеть, на чём построен отчёт), и до сих пор ему приходилось
+     * собирать это руками из страницы «Промпты» и таблицы расчёта. Здесь ровно
+     * те же строки, что уходят в LLM::chatText(): системный промпт первого слоя,
+     * сообщение с расчётом и системный промпт второго слоя. Ничего не
+     * пересчитываем — берём тот же Metrics, что и интерпретация.
+     *
+     * @param array      $version версия промпта первого слоя
+     * @param array|null $style   версия промпта второго слоя (null — слой отключён)
+     * @param string|null $modelLabel модель, выбранная оператором под кнопкой
+     */
+    public static function sourceDump(array $profile, ?array $phys, array $version, ?array $style = null,
+                                      ?string $modelLabel = null): string {
+        $rule = str_repeat('─', 68);
+        $model = trim((string) ($modelLabel ?? '')) !== ''
+            ? trim((string) $modelLabel) : (string) ($version['model_id'] ?? '—');
+        $out = [];
+        $out[] = $rule;
+        $out[] = 'СЛОЙ 1 — СОДЕРЖАНИЕ · СИСТЕМНЫЙ ПРОМПТ (v' . ($version['version_no'] ?? '?')
+               . ', модель ' . $model . ' / ' . ($version['provider'] ?? '—') . ')';
+        $out[] = $rule;
+        $out[] = trim((string) $version['body']);
+        $out[] = '';
+        $out[] = $rule;
+        $out[] = 'СЛОЙ 1 — СОДЕРЖАНИЕ · СООБЩЕНИЕ С ДАННЫМИ (расчёт сервиса, не сырой Excel)';
+        $out[] = $rule;
+        $out[] = self::buildUserMessage($profile, $phys);
+        $out[] = '';
+        $out[] = $rule;
+        if ($style !== null && trim((string) ($style['body'] ?? '')) !== '') {
+            $out[] = 'СЛОЙ 2 — ЯЗЫК · СИСТЕМНЫЙ ПРОМПТ (v' . ($style['version_no'] ?? '?')
+                   . ', модель ' . ($style['model_id'] ?? '—') . ' / ' . ($style['provider'] ?? '—') . ')';
+            $out[] = $rule;
+            $out[] = trim((string) $style['body']);
+            $out[] = '';
+            $out[] = 'В сообщении второго слоя — список фактов, которые обязаны сохраниться, и готовый '
+                   . 'текст первого слоя. Текста ещё нет, поэтому здесь только факты:';
+            $out[] = '';
+            $out[] = trim(str_replace("\nОТЧЁТ ДЛЯ ПРАВКИ:", '', self::buildStyleMessage($profile, $phys, '')));
+        } else {
+            $out[] = 'СЛОЙ 2 — ЯЗЫК: отключён (у семейства «style» нет активной версии) — '
+                   . 'клиент получает текст первого слоя как есть.';
+            $out[] = $rule;
+        }
+        return implode("\n", $out);
+    }
+
     /** Активная версия промпта второго слоя (или null, если слой отключён). */
     public static function styleVersion(): ?array {
         return Prompts::activeVersion(self::STYLE_KEY);

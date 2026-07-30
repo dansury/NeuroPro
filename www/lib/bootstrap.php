@@ -15,6 +15,7 @@ require_once __DIR__ . '/phys.php';
 require_once __DIR__ . '/metrics.php';
 require_once __DIR__ . '/report.php';
 require_once __DIR__ . '/interpret.php';
+require_once __DIR__ . '/trash.php';
 require_once __DIR__ . '/settings_store.php';
 
 function np_boot(): array {

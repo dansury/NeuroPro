@@ -38,8 +38,13 @@ try {
         case 'prompt_delete': act_prompt_delete($cfg); break;
         case 'prompt_family_delete': act_prompt_family_delete($cfg); break;
         case 'interp_block':  act_interp_block($cfg); break;
+        case 'interp_text':   act_interp_text($cfg); break;
+        case 'interp_source': view_interp_source($cfg); break;
         case 'interp_delete': act_interp_delete($cfg); break;
         case 'profile_delete': act_profile_delete($cfg); break;
+        case 'trash':         view_trash($cfg, $h); break;
+        case 'trash_restore': act_trash_restore($cfg); break;
+        case 'trash_purge':   act_trash_purge($cfg); break;
         default:              view_dashboard($cfg, $h);
     }
 } catch (Throwable $e) {
@@ -51,8 +56,12 @@ try {
 /* ─────────────────────────── Views ─────────────────────────── */
 
 function view_dashboard(array $cfg, callable $h): void {
-    $awaiting = Db::all("SELECT * FROM profiles WHERE status='awaiting_screenshot' ORDER BY created_at DESC");
-    $ready = Db::all("SELECT * FROM profiles WHERE status!='awaiting_screenshot' ORDER BY created_at DESC LIMIT 30");
+    // Корзину чистим там, где она видна: отдельного крона у сервиса нет, а
+    // просроченное (старше Trash::KEEP_DAYS) не должно копиться месяцами.
+    Trash::purgeExpired();
+    $awaiting = Db::all("SELECT * FROM profiles WHERE status='awaiting_screenshot' AND deleted_at IS NULL ORDER BY created_at DESC");
+    $ready = Db::all("SELECT * FROM profiles WHERE status!='awaiting_screenshot' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 30");
+    $trash = Trash::counts();
     ob_start(); ?>
     <div class="row"><h1>Профили</h1><a class="btn" href="?p=upload">+ Загрузить Excel</a></div>
     <?php if ($awaiting): ?>
@@ -61,18 +70,21 @@ function view_dashboard(array $cfg, callable $h): void {
       <?php foreach ($awaiting as $p): ?>
         <tr><td><?= $h($p['name']) ?></td><td><?= $h($p['methodic']) ?></td><td><?= $h($p['test_date']) ?></td>
         <td><a class="btn sm" href="?p=profile&id=<?= (int)$p['id'] ?>">Добавить скриншот →</a>
-        <a class="btn sm danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ? Действие необратимо.')">🗑</a></td></tr>
+        <a class="btn sm danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ? Его можно будет вернуть из «Удалённых» в течение <?= Trash::KEEP_DAYS ?> дней.')">🗑</a></td></tr>
       <?php endforeach; ?></table>
     <?php endif; ?>
     <h2>Готовые профили</h2>
     <table class="grid"><tr><th>ФИО</th><th>Методика</th><th>Статус</th><th>Интерпретаций</th><th></th></tr>
     <?php foreach ($ready as $p):
-        $c = Db::one('SELECT COUNT(*) c FROM interpretations WHERE profile_id=?', [$p['id']]); ?>
+        $c = Db::one('SELECT COUNT(*) c FROM interpretations WHERE profile_id=? AND deleted_at IS NULL', [$p['id']]); ?>
       <tr><td><?= $h($p['name']) ?></td><td><?= $h($p['methodic']) ?></td><td><?= $h($p['status']) ?></td>
       <td><?= (int)($c['c'] ?? 0) ?></td>
       <td><a class="btn sm" href="?p=result&id=<?= (int)$p['id'] ?>">Открыть →</a>
-      <a class="btn sm danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ и все его интерпретации? Действие необратимо.')">🗑</a></td></tr>
+      <a class="btn sm danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ и все его интерпретации? Их можно будет вернуть из «Удалённых» в течение <?= Trash::KEEP_DAYS ?> дней.')">🗑</a></td></tr>
     <?php endforeach; ?></table>
+    <!-- Корзина: неброская серая ссылка под списком — она нужна редко, но
+         без неё удаление остаётся необратимым (#3). -->
+    <p class="trashlink"><a href="?p=trash">Удалённые<?= $trash['total'] ? ' (' . (int)$trash['total'] . ')' : '' ?></a></p>
     <?php
     layout('Дашборд', ob_get_clean(), $h);
 }
@@ -218,7 +230,9 @@ function view_result(array $cfg, callable $h): void {
     // показывать одни и те же числа — и незачем считать их трижды.
     $m = Metrics::build($prof, $phys);
     $svg = cognitive_svg($prof, $phys, $m);
-    $interps = Db::all('SELECT i.*, v.version_no FROM interpretations i JOIN prompt_versions v ON v.id=i.prompt_version_id WHERE i.profile_id=? ORDER BY i.created_at DESC', [$p['id']]);
+    $interps = Db::all('SELECT i.*, v.version_no FROM interpretations i JOIN prompt_versions v ON v.id=i.prompt_version_id
+                        WHERE i.profile_id=? AND i.deleted_at IS NULL ORDER BY i.created_at DESC', [$p['id']]);
+    $trashed = count(Trash::interps((int)$p['id']));
     // Интерактивная матрица: математика всегда, плюс фрагмент интерпретации по
     // каждой шкале, если она уже сделана (последняя по времени) — #9.
     $matrix = Matrix::interactiveHtml($m, (string)($interps[0]['content'] ?? ''),
@@ -236,6 +250,11 @@ function view_result(array $cfg, callable $h): void {
     $split = $interps !== [];
     ob_start(); ?>
     <h1><?= $h($prof['name']) ?> <span class="muted">— <?= $h($prof['methodic']) ?></span></h1>
+    <?php if (!empty($p['deleted_at'])): ?>
+      <div class="msg warn">Этот анализ удалён <?= $h($p['deleted_at']) ?> и лежит в «Удалённых»:
+        исчезнет насовсем через <?= (int)Trash::daysLeft($p['deleted_at']) ?> дн.
+        <a href="?p=trash_restore&kind=profile&id=<?= (int)$p['id'] ?>">Восстановить</a></div>
+    <?php endif; ?>
     <?php if ($phys !== null && $phys['error'] !== null): ?>
       <div class="msg bad"><b>Ошибка распознавания скриншота:</b> <?= $h($phys['error']) ?><br>
       Значения физиологии можно ввести вручную в таблице ниже.</div>
@@ -272,10 +291,17 @@ function view_result(array $cfg, callable $h): void {
         <button class="btn" type="submit" disabled>▶ Составить интерпретацию (промпт не выбран)</button>
         <a class="btn ghost" href="?p=prompts">Создать промпт →</a>
       <?php endif; ?>
+      <?php if ($active || $famVersions): ?>
+        <!-- Рядом с кнопкой отчёта — то же самое, но без нейросети: копия того,
+             что уходит в модель (промпты обоих слоёв + расчёт). type=button,
+             иначе кнопка отправила бы форму интерпретации (#1). -->
+        <button class="btn ghost" type="button" id="copysrc"
+                title="Скопировать в буфер: системные промпты обоих слоёв и данные, которые уходят в нейросеть">⧉ Скопировать промпт и данные</button>
+      <?php endif; ?>
       </span>
       <span class="row" style="justify-content:flex-end;gap:8px">
         <a class="btn ghost" href="?p=profile&id=<?= (int)$p['id'] ?>">Заменить скриншот</a>
-        <a class="btn ghost danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ и все его интерпретации? Действие необратимо.')">🗑 Удалить анализ</a>
+        <a class="btn ghost danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ и все его интерпретации? Их можно будет вернуть из «Удалённых» в течение <?= Trash::KEEP_DAYS ?> дней.')">🗑 Удалить анализ</a>
       </span>
       </div>
       <?php if (($active || $famVersions) && $models): ?>
@@ -296,6 +322,49 @@ function view_result(array $cfg, callable $h): void {
       <?php endif; ?>
     </form>
     <?php if ($active || $famVersions): ?>
+      <!-- Запасной путь копирования: браузер отдаёт буфер обмена только по
+           https (или на localhost), а сервис может стоять и без него. Тогда
+           текст просто раскрывается здесь и выделяется — Ctrl+C работает
+           всегда. Заодно оператор видит, что именно уходит в нейросеть. -->
+      <details class="card srcbox" id="srcbox" hidden>
+        <summary>Промпт и данные, которые уходят в нейросеть</summary>
+        <p class="muted">Два системных промпта (содержание и язык) и сообщение с расчётом —
+           ровно в том виде, в каком их получает модель. Текст только для чтения:
+           правки делаются на странице «Промпты».</p>
+        <textarea id="srcdump" rows="16" readonly></textarea>
+      </details>
+      <script>
+      (function(){
+        var btn=document.getElementById('copysrc'), box=document.getElementById('srcbox'),
+            dump=document.getElementById('srcdump');
+        if(!btn||!box||!dump) return;
+        var label=btn.textContent;
+        btn.addEventListener('click', async function(){
+          // Версию промпта оператор мог выбрать вручную — берём ту же, что уйдёт
+          // в интерпретацию, иначе скопированное разошлось бы с отчётом.
+          var vsel=document.querySelector('#interpform select[name=version_id]'),
+              msel=document.querySelector('#interpform select[name=model_id]'),
+              url='?p=interp_source&id=<?= (int)$p['id'] ?>'
+                 + (vsel&&vsel.value ? '&version_id='+encodeURIComponent(vsel.value) : '')
+                 + (msel&&msel.value ? '&model_id='+encodeURIComponent(msel.value) : '');
+          btn.disabled=true; btn.textContent='Собираем…';
+          try{
+            var r=await fetch(url), d=await r.json();
+            if(!d.ok) throw new Error(d.error||'не удалось собрать промпт');
+            dump.value=d.text;
+            box.hidden=false;
+            var copied=false;
+            try{ await navigator.clipboard.writeText(d.text); copied=true; }catch(e){}
+            if(!copied){ box.open=true; dump.focus(); dump.select(); }
+            btn.textContent = copied ? '✓ Скопировано' : 'Ниже — выделено, нажмите Ctrl+C';
+          }catch(err){
+            btn.textContent=label;
+            alert('Не удалось собрать промпт: '+err.message);
+          }
+          setTimeout(function(){ btn.textContent=label; btn.disabled=false; }, 2500);
+        });
+      })();
+      </script>
       <!-- Полоса хода: интерпретация идёт десятки секунд (два слоя — первый
            пишет текст, второй его правит), и без обратной связи оператор жал
            кнопку повторно, порождая лишние запросы к нейросети (#12). -->
@@ -339,14 +408,24 @@ function view_result(array $cfg, callable $h): void {
           <span>
             <a class="btn sm" href="?p=report&interp=<?= (int)$it['id'] ?>&print=1" target="_blank">⤓ PDF</a>
             <a class="btn sm" href="?p=email&interp=<?= (int)$it['id'] ?>" onclick="return confirm('Отправить отчёт на почту клиента?')">✉ На почту</a>
-            <a class="btn sm danger" href="?p=interp_delete&interp=<?= (int)$it['id'] ?>" onclick="return confirm('Удалить интерпретацию? Действие необратимо.')">🗑</a>
+            <!-- Карандаш: правка ВСЕГО текста разом, в Markdown. По абзацам
+                 удобно поправить формулировку, но переставить разделы или
+                 переписать отчёт целиком через двойной клик нельзя (#2). -->
+            <a class="btn sm" href="#" data-editall="<?= (int)$it['id'] ?>"
+               title="Редактировать весь текст интерпретации (Markdown)">✏</a>
+            <a class="btn sm danger" href="?p=interp_delete&interp=<?= (int)$it['id'] ?>" onclick="return confirm('Удалить интерпретацию? Её можно будет вернуть из «Удалённых» в течение <?= Trash::KEEP_DAYS ?> дней.')">🗑</a>
           </span>
         </div>
         <p class="muted">Двойной клик по абзацу — правка (Ctrl+Enter — сохранить, Esc — отмена).
-           Пустой абзац удаляется. Правка сразу попадает в PDF и в письмо.</p>
-        <div class="interp editable" data-interp="<?= (int)$it['id'] ?>"><?= Report::interpToEditableHtml($it['content']) ?></div>
+           Пустой абзац удаляется. Карандаш ✏ открывает весь текст сразу.
+           Правка сразу попадает в PDF и в письмо.</p>
+        <div class="interp editable" data-interp="<?= (int)$it['id'] ?>"
+             data-src="<?= $h(Report::normalizeForEdit((string)$it['content'])) ?>"><?= Report::interpToEditableHtml($it['content']) ?></div>
       </div>
     <?php endforeach; ?>
+    <?php if ($interps || $trashed): ?>
+      <p class="trashlink"><a href="?p=trash&id=<?= (int)$p['id'] ?>">Удалённые<?= $trashed ? ' (' . (int)$trashed . ')' : '' ?></a></p>
+    <?php endif; ?>
     </div><!-- /split-col: интерпретации -->
     </div><!-- /split -->
     <script>
@@ -415,6 +494,69 @@ function view_result(array $cfg, callable $h): void {
           if (block && box.contains(block)) open(block);
         });
       });
+
+      /* ─── Правка ВСЕГО текста (карандаш) ───────────────────────────────
+         Абзац за абзацем нельзя ни переставить разделы, ни вставить готовый
+         текст из другого места. Здесь оператор получает весь Markdown, ровно
+         тот, что лежит в базе, и сохраняет его целиком. */
+      function openFull(box){
+        if (editing || box.classList.contains('fullediting')) return;
+        const rendered = box.innerHTML;
+        box.classList.add('fullediting');
+        box.innerHTML = '';
+        const ta = document.createElement('textarea');
+        ta.className = 'fulledit';
+        ta.value = box.dataset.src || '';
+        const bar = document.createElement('div');
+        bar.className = 'row editbar';
+        const hint = document.createElement('span');
+        hint.className = 'muted';
+        hint.textContent = 'Markdown: ## заголовок, **жирный**, - список. Ctrl+Enter — сохранить, Esc — отмена. Таблицы в отчёт не печатаются.';
+        const btns = document.createElement('span');
+        const ok = document.createElement('button');
+        ok.type = 'button'; ok.className = 'btn sm'; ok.textContent = 'Сохранить';
+        const no = document.createElement('button');
+        no.type = 'button'; no.className = 'btn sm ghost'; no.textContent = 'Отмена';
+        btns.append(ok, no);
+        bar.append(hint, btns);
+        box.append(ta, bar);
+        ta.style.height = Math.max(320, ta.scrollHeight + 16) + 'px';
+        ta.focus();
+        ta.setSelectionRange(0, 0);
+        const cancel = ()=>{ box.classList.remove('fullediting'); box.innerHTML = rendered; };
+        no.addEventListener('click', cancel);
+        ok.addEventListener('click', ()=> saveFull(box, ta.value, rendered));
+        ta.addEventListener('keydown', e=>{
+          if (e.key === 'Escape'){ e.preventDefault(); cancel(); }
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){ e.preventDefault(); saveFull(box, ta.value, rendered); }
+        });
+      }
+
+      async function saveFull(box, text, rendered){
+        if (text === (box.dataset.src || '')) { box.classList.remove('fullediting'); box.innerHTML = rendered; return; }
+        const body = new URLSearchParams({interp: box.dataset.interp, text: text});
+        try{
+          const r = await fetch('?p=interp_text', {method:'POST', body:body,
+            headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}});
+          const data = await r.json();
+          if (!data.ok) throw new Error(data.error || 'не удалось сохранить');
+          box.classList.remove('fullediting');
+          box.dataset.src = data.src;
+          box.innerHTML = data.html;
+        }catch(err){
+          // Текст остаётся в поле: правка целого отчёта — работа не на минуту,
+          // и терять её из-за сбоя сети нельзя.
+          alert('Текст не сохранён: ' + err.message);
+        }
+      }
+
+      document.querySelectorAll('[data-editall]').forEach(btn=>{
+        btn.addEventListener('click', e=>{
+          e.preventDefault();
+          const box = document.querySelector('.interp.editable[data-interp="' + btn.dataset.editall + '"]');
+          if (box) openFull(box);
+        });
+      });
     })();
     </script>
     <?php
@@ -422,8 +564,11 @@ function view_result(array $cfg, callable $h): void {
 }
 
 function view_report(array $cfg): void {
-    $it = Db::one('SELECT * FROM interpretations WHERE id=?', [(int)($_GET['interp'] ?? 0)]);
-    if (!$it) { http_response_code(404); echo 'not found'; return; }
+    // Удалённый отчёт (или отчёт удалённого анализа) не печатается: сначала его
+    // возвращают из «Удалённых» — иначе по старой ссылке уходил бы в PDF текст,
+    // который оператор считает выброшенным.
+    $it = interp_row((int)($_GET['interp'] ?? 0));
+    if (!$it) { http_response_code(404); echo 'Интерпретация не найдена или удалена (см. «Удалённые»).'; return; }
     $p = profile_row((int)$it['profile_id']);
     $prof = profile_decode($p);
     $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
@@ -433,6 +578,98 @@ function view_report(array $cfg): void {
     ]);
     header('Content-Type: text/html; charset=utf-8');
     echo $html;
+}
+
+/**
+ * КОРЗИНА: недавно удалённые анализы и интерпретации. Открывается серой ссылкой
+ * под списком отчётов. Всё, что здесь лежит, можно вернуть одним кликом; через
+ * Trash::KEEP_DAYS дней оно исчезает само (или раньше — «удалить навсегда»).
+ */
+function view_trash(array $cfg, callable $h): void {
+    Trash::purgeExpired();
+    // ?id=N — пришли по ссылке со страницы результата: показываем удалённые
+    // отчёты этого анализа, иначе счётчик в ссылке («Удалённые (1)») не сходился
+    // бы со списком. «Все удалённые» — та же страница без id.
+    $back = (int)($_GET['id'] ?? 0);
+    $profiles = $back ? [] : Trash::profiles();
+    $interps = Trash::interps($back);
+    $others = $back ? max(0, Trash::counts()['total'] - count($interps)) : 0;
+    ob_start(); ?>
+    <div class="row"><h1>Удалённые<?= $back ? ' — этот анализ' : '' ?></h1>
+      <?php if (!$back && ($profiles || $interps)): ?>
+        <a class="btn sm danger" href="?p=trash_purge&kind=all"
+           onclick="return confirm('Очистить корзину полностью? Восстановить будет нельзя.')">Очистить корзину</a>
+      <?php endif; ?>
+    </div>
+    <p class="muted">Удалённое хранится <?= Trash::KEEP_DAYS ?> дней, потом исчезает насовсем.
+       Анализ возвращается вместе со своими интерпретациями.
+       <?php if ($back): ?><a href="?p=result&id=<?= $back ?>">← к анализу</a>
+         <?php if ($others): ?>· <a href="?p=trash">все удалённые (<?= (int)$others ?> ещё)</a><?php endif; ?>
+       <?php endif; ?></p>
+
+    <?php if (!$profiles && !$interps): ?>
+      <div class="card"><p class="muted">Корзина пуста.
+        <?php if ($back && $others): ?><a href="?p=trash">Показать все удалённые →</a><?php endif; ?></p></div>
+    <?php endif; ?>
+
+    <?php if ($interps): ?>
+      <h2>Интерпретации</h2>
+      <table class="grid"><tr><th>Анализ</th><th>Отчёт</th><th>Удалён</th><th>Исчезнет через</th><th></th></tr>
+      <?php foreach ($interps as $it): ?>
+        <tr>
+          <td><?= $h($it['profile_name']) ?> <span class="muted"><?= $h($it['methodic']) ?></span></td>
+          <td>промпт v<?= $h($it['version_no']) ?>, <?= $h($it['model_id']) ?>
+              <span class="muted">от <?= $h($it['created_at']) ?></span></td>
+          <td><?= $h($it['deleted_at']) ?></td>
+          <td><?= (int)Trash::daysLeft($it['deleted_at']) ?> дн.</td>
+          <td><a class="btn sm" href="?p=trash_restore&kind=interp&id=<?= (int)$it['id'] ?><?= $back ? '&back=' . $back : '' ?>">↩ Восстановить</a>
+              <a class="btn sm danger" href="?p=trash_purge&kind=interp&id=<?= (int)$it['id'] ?><?= $back ? '&back=' . $back : '' ?>"
+                 onclick="return confirm('Удалить интерпретацию навсегда?')">🗑</a></td>
+        </tr>
+      <?php endforeach; ?></table>
+    <?php endif; ?>
+
+    <?php if ($profiles): ?>
+      <h2>Анализы</h2>
+      <table class="grid"><tr><th>ФИО</th><th>Методика</th><th>Интерпретаций</th><th>Удалён</th><th>Исчезнет через</th><th></th></tr>
+      <?php foreach ($profiles as $p): ?>
+        <tr>
+          <td><?= $h($p['name']) ?></td><td><?= $h($p['methodic']) ?></td>
+          <td><?= (int)$p['interp_count'] ?></td>
+          <td><?= $h($p['deleted_at']) ?></td>
+          <td><?= (int)Trash::daysLeft($p['deleted_at']) ?> дн.</td>
+          <td><a class="btn sm" href="?p=trash_restore&kind=profile&id=<?= (int)$p['id'] ?>">↩ Восстановить</a>
+              <a class="btn sm danger" href="?p=trash_purge&kind=profile&id=<?= (int)$p['id'] ?>"
+                 onclick="return confirm('Удалить анализ навсегда — вместе со всеми его интерпретациями?')">🗑</a></td>
+        </tr>
+      <?php endforeach; ?></table>
+    <?php endif; ?>
+    <?php
+    layout('Удалённые', ob_get_clean(), $h);
+}
+
+function act_trash_restore(array $cfg): void {
+    $id = (int)($_GET['id'] ?? 0);
+    $back = (int)($_GET['back'] ?? 0);
+    if ((string)($_GET['kind'] ?? '') === 'profile') {
+        Trash::restoreProfile($id);
+        redirect('?p=result&id=' . $id . '&ok=' . urlencode('Анализ восстановлен.'));
+    }
+    $it = Db::one('SELECT profile_id FROM interpretations WHERE id=?', [$id]);
+    Trash::restoreInterp($id);
+    $pid = (int)($it['profile_id'] ?? $back);
+    redirect($pid ? '?p=result&id=' . $pid . '&ok=' . urlencode('Интерпретация восстановлена.')
+                  : '?p=trash&ok=' . urlencode('Интерпретация восстановлена.'));
+}
+
+function act_trash_purge(array $cfg): void {
+    $kind = (string)($_GET['kind'] ?? '');
+    $id = (int)($_GET['id'] ?? 0);
+    $back = (int)($_GET['back'] ?? 0);
+    if ($kind === 'all') { Trash::purgeAll(); $msg = 'Корзина очищена.'; }
+    elseif ($kind === 'profile') { Trash::purgeProfile($id); $msg = 'Анализ удалён навсегда.'; }
+    else { Trash::purgeInterp($id); $msg = 'Интерпретация удалена навсегда.'; }
+    redirect('?p=trash' . ($back ? '&id=' . $back : '') . '&ok=' . urlencode($msg));
 }
 
 function view_prompts(array $cfg, callable $h): void {
@@ -688,8 +925,8 @@ function act_interpret(array $cfg): void {
 
 function act_email(array $cfg): void {
     require_once __DIR__ . '/../lib/mailer.php';
-    $it = Db::one('SELECT * FROM interpretations WHERE id=?', [(int)($_GET['interp'] ?? 0)]);
-    if (!$it) throw new RuntimeException('Интерпретация не найдена');
+    $it = interp_row((int)($_GET['interp'] ?? 0));
+    if (!$it) throw new RuntimeException('Интерпретация не найдена или удалена (см. «Удалённые»).');
     $pid = (int)$it['profile_id'];
     $p = profile_row($pid);
     $prof = profile_decode($p);
@@ -747,19 +984,81 @@ function act_interp_block(array $cfg): void {
     $json(['ok' => true, 'html' => Report::interpToEditableHtml($updated)]);
 }
 
-function act_interp_delete(array $cfg): void {
-    $it = Db::one('SELECT profile_id FROM interpretations WHERE id=?', [(int)($_GET['interp'] ?? 0)]);
-    Db::q('DELETE FROM interpretations WHERE id=?', [(int)($_GET['interp'] ?? 0)]);
-    redirect('?p=result&id=' . (int)($it['profile_id'] ?? 0));
+/**
+ * Правка ВСЕГО текста интерпретации сразу (карандаш ✏ рядом с корзиной).
+ * Оператор получает Markdown из базы, возвращает Markdown же — сервис только
+ * приводит его к каноническому виду (Report::normalizeForEdit), чтобы нумерация
+ * блоков для правки по абзацам осталась той же. Ответ — заново собранный HTML и
+ * сохранённый текст: страница обновляет и то, и другое без перезагрузки.
+ */
+function act_interp_text(array $cfg): void {
+    header('Content-Type: application/json; charset=utf-8');
+    $json = static function (array $data, int $code = 200): void {
+        http_response_code($code);
+        echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    };
+    $id = (int)($_POST['interp'] ?? 0);
+    $it = Db::one('SELECT * FROM interpretations WHERE id=?', [$id]);
+    if (!$it) { $json(['ok' => false, 'error' => 'Интерпретация не найдена'], 404); return; }
+    $text = Report::normalizeForEdit((string)($_POST['text'] ?? ''));
+    // Пустой текст — не правка, а потеря отчёта: для удаления есть корзина.
+    if ($text === '') { $json(['ok' => false, 'error' => 'Текст пуст — используйте 🗑, если отчёт не нужен'], 409); return; }
+    Db::q("UPDATE interpretations SET content=?, edited_at=datetime('now') WHERE id=?", [$text, $id]);
+    $json(['ok' => true, 'src' => $text, 'html' => Report::interpToEditableHtml($text)]);
 }
 
-/** Удаление анализа (профиля) целиком: интерпретации уходят каскадом (FK). */
+/**
+ * То, что уходит в нейросеть, одним текстом — для кнопки «Скопировать промпт и
+ * данные» рядом с кнопкой интерпретации. Ничего не сохраняет и никуда не
+ * обращается: собирает те же строки, что и Interpret::run() (#1).
+ */
+function view_interp_source(array $cfg): void {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $p = profile_row((int)($_GET['id'] ?? 0));
+        $prof = profile_decode($p);
+        // Версия и модель — те же, что выбраны в форме интерпретации, иначе
+        // скопированное разошлось бы с тем, что сервис отправит на самом деле.
+        $vid = (int)($_GET['version_id'] ?? 0);
+        $version = $vid ? Prompts::version($vid) : null;
+        if (!$version) $version = Prompts::activeVersion($prof['test_key']);
+        if (!$version) {
+            http_response_code(409);
+            echo json_encode(['ok' => false, 'error' => 'Для этой методики не выбран промпт (страница «Промпты»).'], JSON_UNESCAPED_UNICODE);
+            return;
+        }
+        $picked = trim((string)($_GET['model_id'] ?? ''));
+        $pickedRow = $picked !== '' ? LLM::findModel($picked) : null;
+        $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
+        $text = Interpret::sourceDump($prof, $phys, $version, Interpret::styleVersion(),
+            $pickedRow ? (string)$pickedRow['id'] : null);
+        echo json_encode(['ok' => true, 'text' => $text], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+}
+
+/** Удаление интерпретации — мягкое: месяц лежит в «Удалённых» (Trash). */
+function act_interp_delete(array $cfg): void {
+    $id = (int)($_GET['interp'] ?? 0);
+    $it = Db::one('SELECT profile_id FROM interpretations WHERE id=?', [$id]);
+    if (!$it) throw new RuntimeException('Интерпретация не найдена');
+    Trash::deleteInterp($id);
+    redirect('?p=result&id=' . (int)$it['profile_id'] . '&ok='
+        . urlencode('Интерпретация удалена — её можно вернуть из «Удалённых» ещё ' . Trash::KEEP_DAYS . ' дней.'));
+}
+
+/**
+ * Удаление анализа (профиля) целиком — тоже мягкое. Интерпретации помечать не
+ * нужно: они скрыты вместе с анализом и вернутся вместе с ним в том же составе.
+ */
 function act_profile_delete(array $cfg): void {
     $id = (int)($_GET['id'] ?? 0);
     profile_row($id); // 404, если профиля нет
-    Db::q('DELETE FROM interpretations WHERE profile_id=?', [$id]);
-    Db::q('DELETE FROM profiles WHERE id=?', [$id]);
-    redirect('?p=dashboard&ok=' . urlencode('Анализ удалён.'));
+    Trash::deleteProfile($id);
+    redirect('?p=dashboard&ok='
+        . urlencode('Анализ удалён — его можно вернуть из «Удалённых» ещё ' . Trash::KEEP_DAYS . ' дней.'));
 }
 
 /** Удаление семейства промптов целиком (со всеми версиями и интерпретациями). */
@@ -783,6 +1082,12 @@ function interp_math_conf(array $interp): array {
     if (!is_string($raw) || trim($raw) === '') return [];
     $snapshot = json_decode($raw, true);
     return is_array($snapshot) ? Metrics::confFromSnapshot($snapshot) : [];
+}
+
+/** Живая интерпретация: не в корзине и её анализ тоже не в корзине. */
+function interp_row(int $id): ?array {
+    return Db::one('SELECT i.* FROM interpretations i JOIN profiles p ON p.id=i.profile_id
+                    WHERE i.id=? AND i.deleted_at IS NULL AND p.deleted_at IS NULL', [$id]);
 }
 
 function profile_row(int $id): array {
@@ -998,6 +1303,17 @@ function layout(string $title, string $body, callable $h, array $opts = []): voi
   .interp.editable .np-block:hover{border-color:#e0e5ea;background:#fbfcfd}
   .interp.editable .np-block.editing{border-color:#b3203b;background:#fff}
   textarea.blockedit{width:100%;font:inherit;font-family:Verdana,Geneva,sans-serif;border:0;outline:0;resize:vertical;padding:6px 0;background:transparent}
+  /* Правка всего текста разом (карандаш): поле во всю карточку + панель кнопок. */
+  textarea.fulledit{width:100%;font:inherit;font-family:Verdana,Geneva,sans-serif;border:1px solid #b3203b;
+                    border-radius:5px;resize:vertical;padding:10px;background:#fff;line-height:1.5}
+  .editbar{margin-top:8px;align-items:flex-start} .editbar .btn{margin-left:6px}
+  /* Копия того, что уходит в нейросеть — запасной путь, когда буфер недоступен. */
+  .srcbox summary{cursor:pointer;font-weight:bold;color:#b3203b}
+  .srcbox textarea{margin-top:8px;font-family:monospace;font-size:11px;white-space:pre;background:#fbfcfd}
+  /* Корзина: ссылка нарочно неброская — она нужна редко. */
+  .trashlink{margin:10px 0 0;text-align:right}
+  .trashlink a{color:#8a949d;font-size:12px;text-decoration:none;border-bottom:1px dotted #c8d0d7}
+  .trashlink a:hover{color:#b3203b;border-bottom-color:#b3203b}
   .np-progress .bar{height:6px;background:#eef1f4;border-radius:3px;overflow:hidden;margin:8px 0 4px}
   .np-progress .bar i{display:block;height:100%;width:40%;background:#b3203b;border-radius:3px;
                       animation:np-run 1.4s ease-in-out infinite}
