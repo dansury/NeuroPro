@@ -18,6 +18,7 @@ header('X-Robots-Tag: noindex, nofollow', true);
 require_once __DIR__ . '/lib/settings_store.php';
 require_once __DIR__ . '/lib/mailer.php';
 require_once __DIR__ . '/lib/llm.php';
+require_once __DIR__ . '/lib/metrics.php';   // значения порогов матрицы по умолчанию
 
 $cfg   = require __DIR__ . '/lib/config.php';
 $store = new SettingsStore($cfg['DB_PATH']);
@@ -72,17 +73,21 @@ $h = static fn (string $s) => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 
 if (empty($_SESSION['admin_authed'])) {
     ?><!doctype html><html lang="ru"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
-    <title>4neuropro — setup (вход)</title>
+    <title>НейроПро — настройки (вход)</title>
     <style>
-      body { font-family: -apple-system, system-ui, sans-serif; background: #0c1018; color: #edf1f7; padding: 24px; }
-      .box { max-width: 340px; margin: 80px auto; background: #131a26; border: 1px solid #1f2735; padding: 28px 26px; }
-      h1 { font-size: 20px; margin: 0 0 18px; }
-      input { width: 100%; padding: 10px 12px; background: #0c1018; color: #edf1f7; border: 1px solid #1f2735; font: inherit; margin-bottom: 14px; }
-      button { background: #00d4e8; color: #0c1018; border: 0; padding: 12px 18px; font-weight: 700; cursor: pointer; width: 100%; }
-      .err { color: #ff4560; font-size: 13px; margin: 0 0 12px; }
-      .hint { color: #9fb0c8; font-size: 13px; line-height: 1.5; margin: 0 0 16px; }
-      .hint code { color: #00d4e8; }
+      /* Тот же светлый стиль, что и у приложения (/app/): тёмная тема настроек
+         выглядела как чужой сервис. */
+      body { font-family: Verdana, Geneva, sans-serif; background: #f4f6f8; color: #2a3138; font-size: 13px; margin: 0; padding: 24px; }
+      .box { max-width: 360px; margin: 70px auto; background: #fff; border: 1px solid #e0e5ea; border-radius: 8px; padding: 24px 22px; }
+      h1 { font-size: 18px; margin: 0 0 16px; color: #b3203b; }
+      input { width: 100%; padding: 9px 11px; background: #fff; color: #2a3138; border: 1px solid #cfd6dd; border-radius: 5px; font: inherit; margin-bottom: 12px; box-sizing: border-box; }
+      button { background: #b3203b; color: #fff; border: 0; padding: 10px 16px; border-radius: 5px; font: inherit; font-weight: bold; cursor: pointer; width: 100%; }
+      button:hover { background: #8f1a30; }
+      .err { background: #fdecef; border: 1px solid #e0a6b0; padding: 9px 10px; border-radius: 6px; margin: 0 0 12px; }
+      .hint { color: #8a949d; line-height: 1.5; margin: 0 0 14px; }
+      .hint code { color: #b3203b; }
     </style></head><body>
     <div class="box">
       <?php if ($is_first_run): ?>
@@ -172,6 +177,7 @@ if ($method === 'POST') {
             'ADMIN_EMAIL', 'ERROR_EMAIL',
             'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME',
             'ADMIN_PASSWORD',
+            'MATRIX_LOW_PCT', 'MATRIX_HIGH_PCT', 'MATRIX_MID_BAND_PCT', 'MATRIX_SIZE_POWER',
         ];
         foreach ($map as $k) {
             $v = trim((string) ($_POST[$k] ?? ''));
@@ -203,33 +209,53 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
 ?><!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>4neuropro — настройки</title>
+<title>НейроПро — настройки</title>
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; background: #0c1018; color: #edf1f7; padding: 24px; max-width: 720px; margin: 0 auto; }
-  h1 { font-size: 22px; } h2 { font-size: 16px; margin: 26px 0 10px; color: #00d4e8; }
-  .lede { color: #9fb0c8; font-size: 14px; }
-  label { display: block; margin: 12px 0; font-size: 14px; }
-  label span { display: block; color: #9fb0c8; margin-bottom: 4px; }
-  input, select { width: 100%; padding: 9px 11px; background: #131a26; color: #edf1f7; border: 1px solid #1f2735; font: inherit; }
-  button { background: #00d4e8; color: #0c1018; border: 0; padding: 12px 20px; font-weight: 700; cursor: pointer; }
-  .msg { padding: 10px 12px; margin: 8px 0; border: 1px solid #1f2735; font-size: 14px; }
-  .msg.ok { border-color: #1f6f4f; } .msg.bad { border-color: #ff4560; }
-  .row { display: flex; gap: 12px; } .row > * { flex: 1; }
-  a { color: #00d4e8; }
-  .probe { border: 1px solid #1f2735; margin: 10px 0 16px; max-height: 320px; overflow: auto; font-size: 13px; }
-  .probe-row { display: flex; gap: 10px; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #161d2a; }
+  /* Оформление — как в приложении (www/app/index.php): шапка с навигацией,
+     карточки, фирменный красный. Раньше настройки были тёмной страницей в
+     другом шрифте и выглядели как отдельный сервис. */
+  body { font-family: Verdana, Geneva, sans-serif; color: #2a3138; background: #f4f6f8; margin: 0; font-size: 13px; }
+  header { background: #fff; border-bottom: 2px solid #b3203b; padding: 10px 20px; display: flex; gap: 18px; align-items: center; }
+  header b { color: #b3203b; font-size: 16px; }
+  header a { color: #2a3138; text-decoration: none; font-weight: bold; }
+  header a:hover { color: #b3203b; }
+  main { max-width: 1000px; margin: 18px auto; padding: 0 16px; }
+  h1 { font-size: 20px; } h2 { font-size: 15px; margin: 14px 0 8px; }
+  .card { background: #fff; border: 1px solid #e0e5ea; border-radius: 8px; padding: 16px; margin: 12px 0; }
+  .lede, .muted { color: #8a949d; }
+  label { display: block; margin: 10px 0; }
+  label span { display: block; color: #6b7682; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 8px 10px; background: #fff; color: #2a3138; border: 1px solid #cfd6dd; border-radius: 5px; font: inherit; box-sizing: border-box; }
+  button { background: #b3203b; color: #fff; border: 0; padding: 9px 14px; border-radius: 5px; font: inherit; font-weight: bold; cursor: pointer; }
+  button:hover { background: #8f1a30; }
+  button.ghost { background: #fff; color: #b3203b; border: 1px solid #b3203b; }
+  .msg { padding: 10px 12px; margin: 8px 0; border-radius: 6px; }
+  .msg.ok { background: #eaf7ee; border: 1px solid #a8d5b5; }
+  .msg.bad { background: #fdecef; border: 1px solid #e0a6b0; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; } .row > * { flex: 1; min-width: 180px; }
+  a { color: #b3203b; }
+  code { color: #b3203b; }
+  .probe { border: 1px solid #e0e5ea; border-radius: 6px; margin: 10px 0 16px; max-height: 320px; overflow: auto; font-size: 12px; }
+  .probe-row { display: flex; gap: 10px; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #eef1f4; }
   .probe-row:last-child { border-bottom: 0; }
-  .probe-row.bad { color: #9fb0c8; } .probe-row em { color: #ff8a97; font-style: normal; text-align: right; }
-  .probe code { color: #00d4e8; }
+  .probe-row.bad { color: #8a949d; } .probe-row em { color: #b3203b; font-style: normal; text-align: right; }
 </style></head><body>
-<h1>4neuropro — настройки <a href="?logout=1" style="font-size:13px;float:right">выйти</a></h1>
+<header><a href="/" style="color:#b3203b"><b>НейроПро</b></a>
+  <a href="/app/?p=dashboard">Профили</a>
+  <a href="/app/?p=upload">Загрузить</a>
+  <a href="/app/?p=prompts">Промпты</a>
+  <a href="/setup.php">Настройки</a>
+  <a href="?logout=1" style="margin-left:auto;font-weight:normal">выйти</a>
+</header>
+<main>
+<h1>Настройки</h1>
 <p class="lede">Заполните только нужные поля — пустые значения не перезаписывают существующие. Значения сразу применяются ко всему сервису (overlay через таблицу <code>settings</code>).</p>
 
 <?php foreach ($messages as $m): ?>
   <div class="msg <?= $m['ok'] ? 'ok' : 'bad' ?>"><?= $h($m['text']) ?></div>
 <?php endforeach; ?>
 
-<form method="post" autocomplete="off">
+<form method="post" autocomplete="off" class="card">
   <input type="hidden" name="action" value="save">
 
   <h2>Провайдер и модели</h2>
@@ -271,8 +297,8 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
   </label>
   <p class="lede" style="margin:-4px 0 8px">Каталог общий для всех установок. Что реально доступно вашему ключу — покажет проверка ниже; недоступная модель не ломает работу, запрос уходит следующему кандидату цепочки.</p>
   <div class="row">
-    <button type="submit" name="models_probe" value="yandex" formnovalidate>Проверить каталог Yandex</button>
-    <button type="submit" name="models_probe" value="openrouter" formnovalidate>Проверить каталог OpenRouter</button>
+    <button class="ghost" type="submit" name="models_probe" value="yandex" formnovalidate>Проверить каталог Yandex</button>
+    <button class="ghost" type="submit" name="models_probe" value="openrouter" formnovalidate>Проверить каталог OpenRouter</button>
   </div>
   <?php if ($probe !== null): ?>
     <div class="probe">
@@ -315,6 +341,25 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
   <label><span>ADMIN_EMAIL (получатель копий/вложений)</span><input type="text" name="ADMIN_EMAIL" placeholder="<?= $h($eff('ADMIN_EMAIL')) ?>"></label>
   <label><span>ERROR_EMAIL (уведомления об ошибках)</span><input type="text" name="ERROR_EMAIL" placeholder="<?= $h($eff('ERROR_EMAIL')) ?>"></label>
 
+  <h2>Матрица показателей</h2>
+  <p class="lede">Пороги и контраст размеров кружков. Их же можно двигать мышью прямо на матрице
+  (страница результата) — значение сохраняется сюда. Пороги решают не только цвет кружка, но и
+  раздел отчёта, в который попадёт шкала: ниже нижнего порога — «низкий» уровень, выше верхнего —
+  «высокий». Полоса медианы задаётся в процентах от предела шкалы физиологии, потому что «Знач.»
+  у разных методик разного порядка.</p>
+  <div class="row">
+    <label><span>Нижний порог, % (по умолчанию <?= $h(Metrics::num(Metrics::LOW_PCT)) ?>)</span>
+      <input type="number" min="1" max="98" step="0.5" name="MATRIX_LOW_PCT" value="<?= $h($eff('MATRIX_LOW_PCT')) ?>"></label>
+    <label><span>Верхний порог, % (по умолчанию <?= $h(Metrics::num(Metrics::HIGH_PCT)) ?>)</span>
+      <input type="number" min="2" max="99" step="0.5" name="MATRIX_HIGH_PCT" value="<?= $h($eff('MATRIX_HIGH_PCT')) ?>"></label>
+  </div>
+  <div class="row">
+    <label><span>Полоса медианы, % от шкалы физиологии (по умолчанию <?= $h(Metrics::num(Metrics::MID_BAND_FRAC * 100)) ?>)</span>
+      <input type="number" min="0" max="50" step="0.5" name="MATRIX_MID_BAND_PCT" value="<?= $h($eff('MATRIX_MID_BAND_PCT')) ?>"></label>
+    <label><span>Мультипликатор размера кружка (1 — линейно, больше — контрастнее)</span>
+      <input type="number" min="0.2" max="6" step="0.1" name="MATRIX_SIZE_POWER" value="<?= $h($eff('MATRIX_SIZE_POWER')) ?>"></label>
+  </div>
+
   <h2>Доступ</h2>
   <p class="lede">Хранится в базе (каталог <code>data/</code> над веб-корнем) и переживает деплой — менять после каждого <code>pull.php</code> не нужно. Пустое поле оставляет текущий пароль.</p>
   <label><span>Пароль администратора (ADMIN_PASSWORD)</span><input type="password" name="ADMIN_PASSWORD" placeholder="<?= $h($mask($eff('ADMIN_PASSWORD'))) ?>"></label>
@@ -322,9 +367,9 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
   <p><button type="submit">Сохранить</button></p>
 </form>
 
-<form method="post" autocomplete="off" style="margin-top:18px;">
+<form method="post" autocomplete="off" class="card">
   <h2>Тест SMTP</h2>
   <label><span>Кому отправить тестовое письмо</span><input type="text" name="smtp_test_to" placeholder="<?= $h($eff('ADMIN_EMAIL')) ?>"></label>
-  <p><button type="submit" name="smtp_test" value="1">Отправить тестовое письмо</button></p>
+  <p><button class="ghost" type="submit" name="smtp_test" value="1">Отправить тестовое письмо</button></p>
 </form>
-</body></html>
+</main></body></html>

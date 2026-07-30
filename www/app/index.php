@@ -28,6 +28,7 @@ try {
         case 'profile':       view_profile($cfg, $h); break;
         case 'screenshot':    act_screenshot($cfg); break;
         case 'phys_save':     act_phys_save($cfg); break;
+        case 'matrix_conf':   act_matrix_conf($cfg); break;
         case 'interpret':     act_interpret($cfg); break;
         case 'result':        view_result($cfg, $h); break;
         case 'report':        view_report($cfg); break;
@@ -77,13 +78,7 @@ function view_dashboard(array $cfg, callable $h): void {
 }
 
 function view_upload(array $cfg, callable $h): void {
-    // Список методик — из известных типов тестов + уже встречавшихся в базе (#4).
-    $methodics = [];
-    foreach (Profile::TEST_TYPES as $info) $methodics[$info['label']] = true;
-    foreach (Db::all("SELECT DISTINCT methodic FROM profiles WHERE methodic IS NOT NULL AND methodic<>'' ORDER BY methodic") as $r) {
-        $methodics[(string)$r['methodic']] = true;
-    }
-    $methodics = array_keys($methodics);
+    $methodics = methodic_options();
     ob_start(); ?>
     <h1>Загрузка профиля</h1>
     <form method="post" enctype="multipart/form-data" class="card">
@@ -93,12 +88,14 @@ function view_upload(array $cfg, callable $h): void {
       <label><span>Вставить данные как текст (CSV/TSV: № , параметр , балл)</span>
         <textarea name="pasted" rows="8" placeholder="1, Познавательный мотив, 9&#10;2, Состязательный мотив, 9 ..."></textarea></label>
       <label><span>Методика (если вставляете текстом)</span>
-        <select name="methodic">
+        <select name="test_key">
           <option value="">— выберите методику —</option>
-          <?php foreach ($methodics as $mname): ?>
-            <option value="<?= $h($mname) ?>"><?= $h($mname) ?></option>
+          <?php foreach ($methodics as $key => $mname): ?>
+            <option value="<?= $h($key) ?>"><?= $h($mname) ?></option>
           <?php endforeach; ?>
-        </select></label>
+        </select>
+        <span class="muted">Список — методики со страницы «Промпты»: одна методика = одно название,
+        поэтому одна и та же методика не двоится из-за разного написания.</span></label>
       <button class="btn" type="submit">Загрузить</button>
     </form>
     <div class="card">
@@ -224,7 +221,8 @@ function view_result(array $cfg, callable $h): void {
     $interps = Db::all('SELECT i.*, v.version_no FROM interpretations i JOIN prompt_versions v ON v.id=i.prompt_version_id WHERE i.profile_id=? ORDER BY i.created_at DESC', [$p['id']]);
     // Интерактивная матрица: математика всегда, плюс фрагмент интерпретации по
     // каждой шкале, если она уже сделана (последняя по времени) — #9.
-    $matrix = Matrix::interactiveHtml($m, (string)($interps[0]['content'] ?? ''), ['width' => 900]);
+    $matrix = Matrix::interactiveHtml($m, (string)($interps[0]['content'] ?? ''),
+        ['width' => 900, 'save_url' => '?p=matrix_conf']);
     $active = Prompts::activeVersion($prof['test_key']);
     // Список версий промптов для выбора вручную, если активная не задана (#8).
     $fam = Prompts::family($prof['test_key']);
@@ -452,7 +450,7 @@ function act_upload(array $cfg): void {
         $prof = Profile::fromFile($dest);
         $src = $dest;
     } elseif (trim((string)($_POST['pasted'] ?? '')) !== '') {
-        $prof = profile_from_text((string)$_POST['pasted'], (string)($_POST['methodic'] ?? ''));
+        $prof = profile_from_text((string)$_POST['pasted'], (string)($_POST['test_key'] ?? ''));
         $src = 'pasted';
     } else {
         throw new RuntimeException('Не передан файл и не вставлен текст');
@@ -525,12 +523,52 @@ function act_phys_save(array $cfg): void {
     $prof = profile_decode($p);
     $count = count($prof['scores']);
     $old = Phys::decode($p['phys_json'] ?? null, $count);
-    // Правку ведёт Phys: распознанные p / СМК / «Балл» по остальным осям
-    // сохраняются, а флажок достоверности не обнуляет p, а задаёт его.
-    $parsed = Phys::fromManual((array)($_POST['zna'] ?? []), $count, (array)($_POST['sig'] ?? []), $old);
+    // Правку ведёт Phys: распознанные p / «Балл» по остальным осям сохраняются,
+    // а флажок достоверности не обнуляет p, а задаёт его. СМК приходит из формы
+    // целиком (пустая строка = «не распознан»), поэтому передаём его отдельно.
+    $parsed = Phys::fromManual((array)($_POST['zna'] ?? []), $count, (array)($_POST['sig'] ?? []), $old,
+        isset($_POST['smk']) ? (array)$_POST['smk'] : null);
     Db::q('UPDATE profiles SET phys_json=?, status=? WHERE id=?',
         [json_encode($parsed, JSON_UNESCAPED_UNICODE), 'ready', $id]);
     redirect('?p=result&id=' . $id . '&ok=' . urlencode('Физиология сохранена.'));
+}
+
+/**
+ * Пороги матрицы и мультипликатор размера кружков — из перетаскивания пунктира
+ * или из полей под матрицей. Значения общие для сервиса (та же таблица
+ * settings, что и у /setup.php): пороги решают, в какой раздел отчёта попадёт
+ * шкала, поэтому храниться «по профилю» они не могут — иначе два отчёта одного
+ * клиента считались бы по разным правилам.
+ */
+function act_matrix_conf(array $cfg): void {
+    header('Content-Type: application/json; charset=utf-8');
+    $store = new SettingsStore($cfg['DB_PATH']);
+    $clamp = static function (string $key, float $min, float $max): ?float {
+        if (!isset($_POST[$key]) || !is_numeric($_POST[$key])) return null;
+        return max($min, min($max, round((float)$_POST[$key], 1)));
+    };
+    $low  = $clamp('low', 1.0, 98.0);
+    $high = $clamp('high', 2.0, 99.0);
+    if ($low !== null && $high !== null && $high <= $low) $high = min(99.0, $low + 1.0);
+    $map = [
+        'MATRIX_LOW_PCT' => $low,
+        'MATRIX_HIGH_PCT' => $high,
+        'MATRIX_MID_BAND_PCT' => $clamp('band', 0.0, 50.0),
+        'MATRIX_SIZE_POWER' => $clamp('power', 0.2, 6.0),
+    ];
+    $saved = [];
+    try {
+        foreach ($map as $k => $v) {
+            if ($v === null) continue;
+            $store->setSetting($k, Metrics::num($v));
+            $saved[$k] = Metrics::num($v);
+        }
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+        return;
+    }
+    echo json_encode(['ok' => true, 'saved' => $saved], JSON_UNESCAPED_UNICODE);
 }
 
 function act_interpret(array $cfg): void {
@@ -666,8 +704,34 @@ function create_profile(array $prof, string $src): int {
     );
 }
 
-/** Build a profile from pasted CSV/TSV text. */
-function profile_from_text(string $text, string $methodic): array {
+/**
+ * Список методик для выбора при загрузке — по СЕМЕЙСТВАМ ПРОМПТОВ, а не по
+ * тому, что уже встречалось в базе. Раньше выпадающий список собирался из
+ * `SELECT DISTINCT methodic`, и одна методика попадала в него несколькими
+ * строками («ИЖС», «LSI», «Индекс жизненного стиля»), потому что в выгрузках
+ * Эгоскопа она названа по-разному. Теперь пункт списка — методика, для которой
+ * есть промпт, а её название каноническое (Profile::TEST_TYPES).
+ *
+ * @return array<string,string> test_key => название методики
+ */
+function methodic_options(): array {
+    $labels = [];
+    foreach (Profile::TEST_TYPES as $info) $labels[$info['key']] = $info['label'];
+    $out = [];
+    foreach (Prompts::allFamilies() as $fam) {
+        $key = (string)$fam['test_key'];
+        if ($key === '') continue;
+        $out[$key] = $labels[$key] ?? (string)$fam['name'];
+    }
+    return $out;
+}
+
+/**
+ * Build a profile from pasted CSV/TSV text.
+ *
+ * @param string $testKey ключ методики из methodic_options() (пусто — не выбрана)
+ */
+function profile_from_text(string $text, string $testKey): array {
     $scores = [];
     foreach (preg_split('/\r?\n/', trim($text)) as $line) {
         if (trim($line) === '') continue;
@@ -683,11 +747,12 @@ function profile_from_text(string $text, string $methodic): array {
         }
         if ($label !== '') $scores[] = ['n' => $n ?: count($scores) + 1, 'label' => $label, 'score' => $score];
     }
-    $key = '';
-    $mu = mb_strtoupper($methodic);
-    foreach (Profile::TEST_TYPES as $needle => $info) if (mb_strpos($mu, mb_strtoupper($needle)) !== false) { $key = $info['key']; break; }
+    // Название методики берём каноническое — по выбранному ключу, а не из
+    // произвольного текста: так один и тот же тест всегда назван одинаково.
+    $options = methodic_options();
+    $key = isset($options[$testKey]) ? $testKey : '';
     return ['name' => 'Без имени', 'age' => '', 'sex' => '', 'date' => date('d m Y H:i'),
-            'methodic' => $methodic ?: 'Не указана', 'test_key' => $key, 'scores' => $scores,
+            'methodic' => $options[$key] ?? 'Не указана', 'test_key' => $key, 'scores' => $scores,
             'score_max' => Profile::scoreMax($scores, $key)];
 }
 
@@ -714,9 +779,11 @@ function phys_table_form(array $prof, ?array $phys, int $id, callable $h, ?array
     ob_start(); ?>
     <div class="card">
       <h2>Расчёт по шкалам — проверьте перед интерпретацией</h2>
-      <p class="muted">«Знач.» и достоверность распознаны со скриншота; уровень, положение
+      <p class="muted">«Знач.», достоверность и СМК распознаны со скриншота; уровень, положение
       относительно медианы и раздел отчёта считает сервис (не нейросеть).
-      Поправьте значения при необходимости и сохраните. Шкала физиологии на
+      Поправьте значения при необходимости и сохраните. Столбец «СМК» — соотношение
+      параметров как на скриншоте (например <code>Z*&gt;X&gt;Y</code>): от него зависит цвет
+      кружка на матрице, и он используется независимо от достоверности. Шкала физиологии на
       диаграмме: ±<?= $h(Metrics::num($m['phys_scale'])) ?>.</p>
       <?php if ($image !== ''): ?>
         <div class="shot">
@@ -741,7 +808,8 @@ function phys_table_form(array $prof, ?array $phys, int $id, callable $h, ?array
             <td><input type="checkbox" name="sig[<?= $i ?>]" value="1" <?= $a['sig'] ? 'checked' : '' ?>>
                 <span class="muted"><?= $h($a['p_label']) ?></span></td>
             <td><?= $h($a['phys_label']) ?></td>
-            <td><?= $h($a['smk'] ?: '—') ?></td>
+            <td><input class="smk" type="text" name="smk[<?= $i ?>]" value="<?= $h($a['smk']) ?>" placeholder="—"
+                       title="Соотношение параметров, как в столбце «СМК»: Z*&gt;X&gt;Y"></td>
             <td><?= $h($a['category_title'] ?: 'не упоминается') ?></td>
           </tr>
           <?php endforeach; ?>
@@ -819,7 +887,7 @@ function layout(string $title, string $body, callable $h): void {
   .msg.warn{background:#fff8e6;border:1px solid #e8d29a;padding:10px;border-radius:6px;margin:10px 0}
   .msg.ok{background:#eaf7ee;border:1px solid #a8d5b5;padding:10px;border-radius:6px;margin:10px 0}
   tr.sig td{font-weight:bold}
-  input.num{width:80px;text-align:center}
+  input.num{width:80px;text-align:center} input.smk{width:96px;text-align:center}
   @media(max-width:760px){.grid2{grid-template-columns:1fr}}
 </style></head><body>
 <header><a href="/" style="color:#b3203b"><b>НейроПро</b></a>

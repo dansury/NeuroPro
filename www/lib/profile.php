@@ -86,7 +86,7 @@ final class Profile {
             'age'       => $meta['age'],
             'sex'       => $meta['sex'],
             'date'      => $meta['date'],
-            'methodic'  => $meta['methodic'],
+            'methodic'  => self::canonicalMethodic($meta['methodic'], $testKey),
             'test_key'  => $testKey,
             'scores'    => $scores,          // [['n'=>1,'label'=>..,'score'=>9.0], ...]
             'score_max' => self::scoreMax($scores, $testKey),
@@ -190,6 +190,20 @@ final class Profile {
         $max = 10;
         foreach ($scores as $s) { if ($s['score'] > $max) $max = (int) ceil($s['score']); }
         return $max <= 10 ? 10 : 100;
+    }
+
+    /**
+     * Каноническое название методики по её ключу. В выгрузках Эгоскопа одна и та
+     * же методика подписана по-разному («ИЖС», «LSI», «Индекс жизненного стиля»),
+     * из-за чего в списках она двоилась. Опознанный тест всегда называем одинаково;
+     * неопознанный оставляем как есть — придумывать за прибор нельзя.
+     */
+    public static function canonicalMethodic(string $methodic, string $testKey): string {
+        if ($testKey === '') return $methodic;
+        foreach (self::TEST_TYPES as $info) {
+            if ($info['key'] === $testKey) return $info['label'];
+        }
+        return $methodic;
     }
 
     public static function chartTitle(string $testKey): string {

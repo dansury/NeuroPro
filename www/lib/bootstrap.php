@@ -29,6 +29,9 @@ function np_boot(): array {
     Db::init($cfg['DB_PATH']);
     $store = new SettingsStore($cfg['DB_PATH']);
     LLM::init($cfg, $store);
+    // Пороги матрицы и контраст размеров кружков — настройка оператора: расчёт
+    // берёт их отсюда, поэтому configure() зовётся до первого Metrics::build().
+    Metrics::configure($cfg);
 
     np_seed_prompts($cfg);
     return $cfg;
@@ -39,10 +42,11 @@ const NP_PROMPT_V1_COMMENT = 'Импортировано из исходного
 const NP_PROMPT_V2_COMMENT = 'v2: адаптация под недорогие модели (DeepSeek и др.) — вход описан как распознанный текст скриншота';
 const NP_PROMPT_V3_COMMENT = 'v3: вся математика в коде (Metrics) — модель получает готовый расчёт и только пишет текст';
 const NP_PROMPT_V4_COMMENT = 'v4: расчёт, итоги методики и матрица показателей приходят готовыми; в отчёте клиента таблиц нет';
+const NP_PROMPT_V5_COMMENT = 'v5: глубина отчёта у недорогих моделей — скелет разбора шкалы, объём, СМК всегда, конкретные рекомендации';
 
 /** Комментарии всех автосидируемых версий — по ним отличаем служебные от ручных. */
 function np_seeded_comments(): array {
-    return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT];
+    return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT, NP_PROMPT_V5_COMMENT];
 }
 
 /** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
@@ -90,6 +94,7 @@ function np_seed_prompts(array $cfg = []): void {
     np_seed_prompts_v2($model, $provider);
     np_seed_prompts_v3($model, $provider);
     np_seed_prompts_v4($model, $provider);
+    np_seed_prompts_v5($model, $provider);
     np_heal_seeded_models($model, $provider);
 }
 
@@ -116,6 +121,22 @@ function np_seed_prompts_v4(string $model = 'yandexgpt', string $provider = 'yan
         ['smu' => 'smu_v4.php', 'lsi' => 'lsi_v4.php', 'bd' => 'bd_v4.php'],
         NP_PROMPT_V4_COMMENT,
         [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT],
+        $model, $provider
+    );
+}
+
+/**
+ * Досидирует версии v5 — промпты «на глубину». Расчёт тот же, что у v4, но
+ * текст отчёта у недорогих моделей (gemini-flash и подобных) получался пустым:
+ * одно-два предложения на шкалу, общие рекомендации, соотношение СМК не
+ * использовалось. v5 задаёт скелет разбора каждой шкалы, требует объём и
+ * обязательно использует СМК — независимо от достоверности отклонения.
+ */
+function np_seed_prompts_v5(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    np_seed_prompt_generation(
+        ['smu' => 'smu_v5.php', 'lsi' => 'lsi_v5.php', 'bd' => 'bd_v5.php'],
+        NP_PROMPT_V5_COMMENT,
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT],
         $model, $provider
     );
 }
