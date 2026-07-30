@@ -9,24 +9,38 @@ require_once __DIR__ . '/llm.php';
 require_once __DIR__ . '/prompts.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/profile.php';
+require_once __DIR__ . '/metrics.php';
 
 final class Interpret {
     /**
-     * @param array  $profile      profile array
-     * @param string $physOcrText  recognized physiological table text (may be '')
-     * @param array  $version      prompt_versions row to use
+     * @param array      $profile profile array
+     * @param array|null $phys    структура Phys::decode (или null)
+     * @param array      $version prompt_versions row to use
      * @return string interpretation text
      */
-    public static function run(array $profile, string $physOcrText, array $version): string {
+    public static function run(array $profile, ?array $phys, array $version): string {
         if (!empty($version['model_id'])) LLM::setModelOverride($version['model_id']);
         if (!empty($version['provider'])) LLM::setProviderOverride($version['provider']);
 
         $system = (string) $version['body'];
-        $user = self::buildUserMessage($profile, $physOcrText);
+        $user = self::buildUserMessage($profile, $phys);
         return trim(LLM::chatText($system, $user, null, 0.6));
     }
 
-    public static function buildUserMessage(array $profile, string $physOcrText): string {
+    /**
+     * Сообщение для нейросети — ГОТОВЫЙ расчёт, а не сырые данные.
+     *
+     * Раньше сюда уходил распознанный текст скриншота, и модель сама считала
+     * доли от максимума, определяла положение относительно медианы и
+     * раскладывала шкалы по разделам — с ошибками (уровни занижались, шкала с
+     * отрицательным «Знач.» описывалась как телесное напряжение, одна шкала
+     * попадала в два раздела). Теперь всё это считает Metrics, а модель получает
+     * уровень, достоверность, категорию и опорный факт по каждой шкале.
+     *
+     * @param array|null $phys структура Phys::decode
+     */
+    public static function buildUserMessage(array $profile, ?array $phys = null): string {
+        $m = Metrics::build($profile, $phys);
         $lines = [];
         $lines[] = 'ДАННЫЕ КЛИЕНТА:';
         $lines[] = 'ФИО: ' . $profile['name'];
@@ -34,30 +48,55 @@ final class Interpret {
         $lines[] = 'Методика: ' . $profile['methodic'];
         $lines[] = 'Дата: ' . $profile['date'];
         $lines[] = '';
-        $testKey = (string) ($profile['test_key'] ?? '');
-        $lines[] = $testKey === 'bd'
-            ? 'КОГНИТИВНЫЕ БАЛЛЫ (из Excel; у каждой шкалы свой максимум — число её вопросов):'
-            : 'КОГНИТИВНЫЕ БАЛЛЫ (из Excel, шкала 0–' . ($profile['score_max'] ?? 10) . '):';
-        foreach ($profile['scores'] as $s) {
-            $line = sprintf('%d. %s — %s', $s['n'], $s['label'], self::num((float) $s['score']));
-            $scaleMax = Profile::scaleMax($testKey, (string) $s['label']);
-            if ($scaleMax !== null) $line .= ' из ' . $scaleMax;
-            $lines[] = $line;
-        }
-        // Индексы Басса-Дарки считаем сами (математика), чтобы нейросеть их не выводила.
-        foreach ($testKey === 'bd' ? Profile::bdIndices($profile['scores']) : [] as $name => $ix) {
-            $lines[] = sprintf('%s = %s из %d (норма %s–%s) — %s.',
-                $name, self::num($ix['value']), $ix['cap'], self::num($ix['min']), self::num($ix['max']), $ix['verdict']);
-        }
-        $lines[] = '';
-        if (trim($physOcrText) !== '') {
-            $lines[] = 'ТАБЛИЦА СМЫСЛО-ЭМОЦИОНАЛЬНОЙ ЗНАЧИМОСТИ (распознано OCR со скриншота — X/Y/Z, Зна, p):';
-            $lines[] = $physOcrText;
-        } else {
-            $lines[] = 'ТАБЛИЦА ФИЗИОЛОГИИ: не предоставлена (OCR пуст). Проанализируй только когнитивную часть и отметь это.';
+
+        $lines[] = 'РАСЧЁТ ПО ШКАЛАМ (посчитан сервисом; НЕ пересчитывай, НЕ переклассифицируй):';
+        foreach ($m['axes'] as $a) {
+            $lines[] = sprintf('%d. %s — %s', $a['n'], $a['label'], $a['fact']);
+            $extra = [];
+            if ($a['category'] === 'skip') {
+                $extra[] = 'РАЗДЕЛ: не упоминать в отчёте';
+            } else {
+                $extra[] = 'РАЗДЕЛ: ' . $a['category_title'];
+            }
+            // Доминирующий параметр даём только там, где тело реально откликнулось:
+            // «преобладает Y» у шкалы с Знач. ниже медианы толкает модель писать
+            // про эмоциональный отклик там, где его достоверно нет.
+            if ($a['smk_label'] !== '' && $a['phys_state'] === 'above') $extra[] = $a['smk_label'];
+            $lines[] = '   ' . implode('; ', $extra);
         }
         $lines[] = '';
-        $lines[] = 'Сформируй интерпретацию строго по инструкции из системного промпта.';
+
+        if (!$m['has_phys']) {
+            $lines[] = 'ФИЗИОЛОГИЯ: не предоставлена или не распознана. Про телесные реакции не пиши вообще; '
+                     . 'первой строкой отчёта отметь, что интерпретация построена только на ответах теста.';
+            $lines[] = '';
+        }
+
+        if ($m['indices']) {
+            $lines[] = 'ИНДЕКСЫ (посчитаны сервисом; НЕ пересчитывай):';
+            foreach ($m['indices'] as $name => $ix) {
+                $lines[] = sprintf('%s = %s из %d (норма %s–%s) — %s.',
+                    $name, self::num($ix['value']), $ix['cap'], self::num($ix['min']), self::num($ix['max']), $ix['verdict']);
+            }
+            $lines[] = '';
+        }
+
+        $lines[] = 'РАЗДЕЛЫ ОТЧЁТА И ИХ СОСТАВ (иных шкал в разделе быть не может, шкала — ровно в одном разделе):';
+        $anySection = false;
+        foreach ($m['groups'] as $cat => $idxs) {
+            if (!$idxs || $cat === 'skip') continue;
+            $anySection = true;
+            $names = array_map(static fn ($i) => $m['axes'][$i]['label'], $idxs);
+            $lines[] = sprintf('- %s: %s', Metrics::CATEGORIES[$cat]['title'], implode(', ', $names));
+            $lines[] = '  (смысл раздела: ' . Metrics::CATEGORIES[$cat]['meaning'] . ')';
+        }
+        if (!$anySection) $lines[] = '- ни одна шкала не попала в разделы: напиши только общее спокойное резюме.';
+        $skipped = array_map(static fn ($i) => $m['axes'][$i]['label'], $m['groups']['skip'] ?? []);
+        if ($skipped) $lines[] = '- НЕ УПОМИНАТЬ ВООБЩЕ: ' . implode(', ', $skipped);
+        $lines[] = '';
+
+        $lines[] = 'Сформируй интерпретацию строго по инструкции из системного промпта. '
+                 . 'Таблицу не выводи — её отчёт печатает сам.';
         return implode("\n", $lines);
     }
 

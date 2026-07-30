@@ -12,6 +12,7 @@ require_once __DIR__ . '/llm.php';
 require_once __DIR__ . '/prompts.php';
 require_once __DIR__ . '/profile.php';
 require_once __DIR__ . '/phys.php';
+require_once __DIR__ . '/metrics.php';
 require_once __DIR__ . '/report.php';
 require_once __DIR__ . '/interpret.php';
 require_once __DIR__ . '/settings_store.php';
@@ -36,6 +37,12 @@ function np_boot(): array {
 /** Комментарии-маркеры автосидируемых версий (по ним же проверяется идемпотентность). */
 const NP_PROMPT_V1_COMMENT = 'Импортировано из исходного промпта';
 const NP_PROMPT_V2_COMMENT = 'v2: адаптация под недорогие модели (DeepSeek и др.) — вход описан как распознанный текст скриншота';
+const NP_PROMPT_V3_COMMENT = 'v3: вся математика в коде (Metrics) — модель получает готовый расчёт и только пишет текст';
+
+/** Комментарии всех автосидируемых версий — по ним отличаем служебные от ручных. */
+function np_seeded_comments(): array {
+    return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT];
+}
 
 /** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
 function np_prompt_families(): array {
@@ -80,7 +87,35 @@ function np_seed_prompts(array $cfg = []): void {
     }
     np_heal_stub_prompts();
     np_seed_prompts_v2($model, $provider);
+    np_seed_prompts_v3($model, $provider);
     np_heal_seeded_models($model, $provider);
+}
+
+/**
+ * Досидирует версии v3 — промпты под расчёт в коде (www/lib/metrics.php):
+ * уровни, достоверность и разделы приходят готовыми, модель только пишет текст.
+ * v3 становится активной, только если оператор ещё не выбирал версию сам
+ * (активна нетронутая автосидированная v1/v2) — ручной выбор не перебиваем.
+ */
+function np_seed_prompts_v3(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    $v3 = ['smu' => 'smu_v3.php', 'lsi' => 'lsi_v3.php', 'bd' => 'bd_v3.php'];
+    foreach ($v3 as $key => $file) {
+        $fam = Prompts::family($key);
+        if (!$fam) continue;
+        $promptId = (int) $fam['id'];
+        if (Db::one('SELECT id FROM prompt_versions WHERE prompt_id = ? AND comment = ?', [$promptId, NP_PROMPT_V3_COMMENT])) continue;
+        $path = __DIR__ . '/prompts/' . $file;
+        if (!is_file($path)) continue;
+        $body = trim((string) require $path);
+        if ($body === '') continue;
+        $versionId = Prompts::addVersion($promptId, $body, $model, $provider, NP_PROMPT_V3_COMMENT);
+        $active = $fam['active_version_id'] ? Prompts::version((int) $fam['active_version_id']) : null;
+        // Автосидированную версию заменяем, ручную (или уже с интерпретациями) — нет.
+        if ($active === null
+            || in_array((string) ($active['comment'] ?? ''), [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT], true)) {
+            Prompts::setActive($promptId, $versionId);
+        }
+    }
 }
 
 /**
@@ -94,9 +129,11 @@ function np_seed_prompts(array $cfg = []): void {
 function np_heal_seeded_models(string $model, string $provider): void {
     $legacy = ['deepseek-r1', 'deepseek-v3'];
     if (in_array($model, $legacy, true)) return;   // оператор сам выбрал такую модель
+    $seeded = np_seeded_comments();
     $rows = Db::all(
-        'SELECT id, model_id FROM prompt_versions WHERE comment IN (?, ?) AND model_id IN (?, ?)',
-        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, $legacy[0], $legacy[1]]
+        'SELECT id, model_id FROM prompt_versions WHERE comment IN (' . implode(',', array_fill(0, count($seeded), '?'))
+        . ') AND model_id IN (?, ?)',
+        [...$seeded, $legacy[0], $legacy[1]]
     );
     foreach ($rows as $row) {
         if (Prompts::interpCount((int) $row['id']) > 0) continue;

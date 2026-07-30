@@ -3,8 +3,9 @@
  * Parse the OCR'd "смысло-эмоциональная значимость" table into structured
  * physiological rows and align the signed "Знач." value (визуальная шкала
  * Эгоскопа: отклонение от медианы, столбец «Знач.»/«Значение») with the
- * cognitive axes so the chart can overlay it. Also extracts the p-value per
- * row ("Достоверность"): rows with p<0.05 are rendered bold on the chart.
+ * cognitive axes so the chart can overlay it. Also extracts per row:
+ * достоверность (p), доминирующий параметр (столбец «СМК»: Z>X>Y) и «Балл»
+ * — последний нужен только для сверки с Excel, источник истины — Excel.
  *
  * OCR of a screenshot table is inherently noisy, so this is best-effort and the
  * UI always lets the operator review/override the aligned values before the
@@ -19,10 +20,23 @@ final class Phys {
     private const STOP = ['мотив', 'мотива', 'и', 'в', 'на', 'по', 'самооценки', 'личностного'];
 
     /**
+     * Достоверность в OCR-тексте. Латинская «p» часто распознаётся как русская
+     * «р», ноль — как «О»/«o», а «<» может прийти как «&lt;» или «‹». Раньше
+     * шаблон принимал только латинскую «p» с цифровым нулём, и строка
+     * «Обида −12 p<0.05» теряла достоверность: в отчёте вместо реального
+     * p<0.05 появлялся прочерк.
+     */
+    private const P_RE = '/[pрP\x{0420}]\s*(=|<|>|≤|≥|&lt;|&gt;|‹|›)?\s*([01OoОо][.,]\d+)/u';
+
+    /** Тот же шаблон для вырезания p из строки перед поиском чисел. */
+    private const P_STRIP_RE = '/[pрP\x{0420}]\s*(?:=|<|>|≤|≥|&lt;|&gt;|‹|›)?\s*[01OoОо][.,]\d+/u';
+
+    /**
      * @param string $ocrText  recognized text of the screenshot
      * @param array  $labels   cognitive axis labels (defines order + count)
      * @return array ['aligned' => [signedZna|null,...], 'p' => [float|null,...],
-     *                'sig' => [bool,...], 'rows' => [...], 'error' => null]
+     *                'sig' => [bool,...], 'smk' => [string,...], 'ball' => [float|null,...],
+     *                'rows' => [...], 'error' => null]
      */
     public static function parse(string $ocrText, array $labels): array {
         $n = count($labels);
@@ -30,6 +44,8 @@ final class Phys {
             'aligned' => array_fill(0, $n, null),
             'p'       => array_fill(0, $n, null),
             'sig'     => array_fill(0, $n, false),
+            'smk'     => array_fill(0, $n, ''),
+            'ball'    => array_fill(0, $n, null),
             'rows'    => [],
             'error'   => null,
         ];
@@ -48,20 +64,30 @@ final class Phys {
         if (!$found) return $out;
         asort($found); // в порядке появления в OCR-тексте
 
-        // 2. Построчный (row-major) проход: Знач. и p ищем в «полосе» строк от
+        // 2. Построчный (row-major) проход: Знач., p и СМК ищем в «полосе» строк от
         //    подписи оси до подписи следующей найденной оси — Yandex OCR может
         //    разнести ячейки одной строки таблицы по нескольким строкам текста.
         $order = array_keys($found);
         $lineIdxs = array_values($found);
         foreach ($order as $k => $idx) {
             $from = $lineIdxs[$k];
-            $to = $lineIdxs[$k + 1] ?? min(count($lines), $from + 3); // хвост таблицы: не дальше 2 строк
+            // Для последней оси полоса тянется до конца текста, но не больше 4 строк:
+            // хвост таблицы у Эгоскопа — пустая строка, а p может уехать на вторую.
+            $to = $lineIdxs[$k + 1] ?? min(count($lines), $from + 4);
             $span = implode(' ', array_slice($lines, $from, max(1, $to - $from)));
-            $zna = self::firstSigned(self::stripLabel($span, (string) $labels[$idx]));
-            if ($zna === null) continue;
-            $out['aligned'][$idx] = $zna;
+            $clean = self::stripLabel($span, (string) $labels[$idx]);
+            $nums = self::allSigned($clean);
+            if (!$nums) continue;
+            $out['aligned'][$idx] = $nums[0];                       // «Знач.» — первый числовой столбец
             $out['p'][$idx] = self::pValue($span);
-            $out['rows'][$idx] = ['label' => $labels[$idx], 'zna' => $zna, 'p' => $out['p'][$idx], 'raw' => trim($span)];
+            $out['smk'][$idx] = self::smk($clean);
+            // «Балл» — последний числовой столбец, есть только если столбцов ≥ 3
+            // («Знач.», «m», …, «Балл»). Нужен исключительно для сверки с Excel.
+            $out['ball'][$idx] = count($nums) >= 3 ? $nums[count($nums) - 1] : null;
+            $out['rows'][$idx] = [
+                'label' => $labels[$idx], 'zna' => $nums[0], 'p' => $out['p'][$idx],
+                'smk' => $out['smk'][$idx], 'ball' => $out['ball'][$idx], 'raw' => trim($span),
+            ];
         }
 
         // 3. Колоночный (column-major) fallback: OCR отдал сначала столбец имён,
@@ -76,11 +102,18 @@ final class Phys {
                 if (count($nums) >= count($found)) break;
             }
             if (count($nums) >= count($found)) {
-                $pvals = self::allPValues(implode(' ', $tail));
+                $joined = implode(' ', $tail);
+                $pvals = self::allPValues($joined);
+                $smks = self::allSmk($joined);
                 foreach ($order as $k => $idx) {
                     $out['aligned'][$idx] = $nums[$k];
                     $out['p'][$idx] = $pvals[$k] ?? null;
-                    $out['rows'][$idx] = ['label' => $labels[$idx], 'zna' => $nums[$k], 'p' => $out['p'][$idx], 'raw' => 'column-major'];
+                    $out['smk'][$idx] = $smks[$k] ?? '';
+                    $out['ball'][$idx] = null; // в колоночном режиме столбцы не различить
+                    $out['rows'][$idx] = [
+                        'label' => $labels[$idx], 'zna' => $nums[$k], 'p' => $out['p'][$idx],
+                        'smk' => $out['smk'][$idx], 'ball' => null, 'raw' => 'column-major',
+                    ];
                 }
             }
         }
@@ -114,21 +147,15 @@ final class Phys {
         return $line;
     }
 
-    /** First signed number on a line (the Знач. value — первый числовой столбец). */
-    private static function firstSigned(string $line): ?float {
-        $all = self::allSigned($line);
-        return $all[0] ?? null;
-    }
-
     /** Все знаковые числа строки, кроме p-значений (p>0.05 и т.п.). */
     private static function allSigned(string $line): array {
         // Вырезаем p-значения, иначе «p>0.05» перехватывается как Зна, когда
         // само Зна целое (формат Басса-Дарки: «Косвенная агрессия 6 6 p>0.05»).
-        $line = (string) preg_replace('/p\s*[=<>≤≥]?\s*[01][.,]\d+/ui', ' ', $line);
+        $line = (string) preg_replace(self::P_STRIP_RE, ' ', $line);
         $out = [];
-        if (preg_match_all('/[-−]?\d+(?:[.,]\d+)?/u', $line, $m)) {
+        if (preg_match_all('/[-−–]?\d+(?:[.,]\d+)?/u', $line, $m)) {
             foreach ($m[0] as $tok) {
-                $out[] = (float) str_replace([',', '−', ' '], ['.', '-', ''], $tok);
+                $out[] = (float) str_replace([',', '−', '–', ' '], ['.', '-', '-', ''], $tok);
             }
         }
         return $out;
@@ -140,36 +167,100 @@ final class Phys {
         return $all[0] ?? null;
     }
 
-    /** Все p-значения строки по порядку. «p<X» трактуем чуть ниже X, «p>X» — выше. */
+    /**
+     * Все p-значения строки по порядку. Неравенство сохраняем в числе: «p<0.05»
+     * достоверно, «p>0.05» — нет. Если знак неравенства не распознан, значение
+     * пропускаем: у Эгоскопа достоверность всегда напечатана неравенством, и
+     * догадка «наверное, недостоверно» была бы выдуманными данными.
+     */
     private static function allPValues(string $line): array {
         $out = [];
-        if (preg_match_all('/p\s*([=<>≤≥]?)\s*([01][.,]\d+)/ui', $line, $m, PREG_SET_ORDER)) {
+        if (preg_match_all(self::P_RE, $line, $m, PREG_SET_ORDER)) {
             foreach ($m as $hit) {
-                $v = (float) str_replace(',', '.', $hit[2]);
-                // Неравенство сохраняем в числе: p<0.05 достоверно, p>0.05 — нет.
-                if ($hit[1] === '<' || $hit[1] === '≤') $v -= 0.001;
-                elseif ($hit[1] === '>' || $hit[1] === '≥') $v += 0.001;
-                $out[] = round($v, 4);
+                $op = $hit[1] ?? '';
+                $num = str_replace(['O', 'o', 'О', 'о', ','], ['0', '0', '0', '0', '.'], $hit[2]);
+                $v = (float) $num;
+                $out[] = match ($op) {
+                    '<', '≤', '&lt;', '‹' => round($v - 0.001, 4),
+                    '>', '≥', '&gt;', '›' => round($v + 0.001, 4),
+                    '='                   => round($v, 4),
+                    default               => null, // знак не распознан — достоверность неизвестна
+                };
             }
         }
         return $out;
     }
 
-    /** Build the aligned array from operator-entered values keyed by axis index. */
-    public static function fromManual(array $values, int $count): array {
-        $aligned = array_fill(0, $count, null);
+    /**
+     * Столбец «СМК» — порядок доминирования параметров: «Z>X>Y», «X*Z*>Y»,
+     * «Y>XZ». Возвращаем токен как есть (первая буква = доминирующий параметр,
+     * «*» = «значительно»). Кириллические двойники X/Y нормализуем.
+     */
+    private static function smk(string $line): string {
+        $all = self::allSmk($line);
+        return $all[0] ?? '';
+    }
+
+    /** Все СМК-токены строки по порядку. */
+    private static function allSmk(string $line): array {
+        $norm = str_replace(
+            ['Х', 'х', 'У', 'у', 'Ζ', 'x', 'y', 'z', '≥'],
+            ['X', 'X', 'Y', 'Y', 'Z', 'X', 'Y', 'Z', '>'],
+            (string) preg_replace(self::P_STRIP_RE, ' ', $line)
+        );
+        $out = [];
+        if (preg_match_all('/[XYZ][XYZ*>]{2,}/u', $norm, $m)) {
+            foreach ($m[0] as $tok) {
+                // Осмысленный токен содержит «>» и минимум две разные буквы из
+                // X/Y/Z — иначе это русский текст, в котором «х»/«у» стали X/Y.
+                if (!str_contains($tok, '>')) continue;
+                $letters = array_unique(preg_split('//', preg_replace('/[^XYZ]/', '', $tok), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+                if (count($letters) >= 2) $out[] = $tok;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Ручная правка оператором: «Знач.» по осям + флажки достоверности. Раньше
+     * возвращался только aligned, из-за чего правка одного значения обнуляла
+     * распознанные p / СМК по всем осям.
+     *
+     * @param array      $values  ['axisIdx' => 'знач.'] из формы
+     * @param array      $sigPost ['axisIdx' => '1'] отмеченные p<0.05
+     * @param array|null $old     прежняя структура (p / smk / ball сохраняем)
+     */
+    public static function fromManual(array $values, int $count, array $sigPost = [], ?array $old = null): array {
+        $out = [
+            'aligned' => array_fill(0, $count, null),
+            'p'       => $old['p'] ?? array_fill(0, $count, null),
+            'sig'     => array_fill(0, $count, false),
+            'smk'     => $old['smk'] ?? array_fill(0, $count, ''),
+            'ball'    => $old['ball'] ?? array_fill(0, $count, null),
+            'rows'    => $old['rows'] ?? [],
+            'error'   => null, // оператор поправил вручную — прежняя ошибка OCR снята
+        ];
         foreach ($values as $i => $v) {
             $i = (int) $i;
             if ($i < 0 || $i >= $count) continue;
             $v = trim((string) $v);
-            $aligned[$i] = $v === '' ? null : (float) str_replace(',', '.', $v);
+            $out['aligned'][$i] = $v === '' ? null : (float) str_replace([',', '−', '–'], ['.', '-', '-'], $v);
         }
-        return $aligned;
+        for ($i = 0; $i < $count; $i++) {
+            $out['sig'][$i] = !empty($sigPost[$i]);
+            $wasSig = ($out['p'][$i] ?? null) !== null && $out['p'][$i] < self::SIG;
+            // Флажок оператора главнее распознанного p — но только если он его менял.
+            if ($out['sig'][$i] !== $wasSig) {
+                $out['p'][$i] = $out['sig'][$i] ? self::SIG - 0.001 : self::SIG + 0.001;
+            }
+        }
+        return $out;
     }
 
     /**
      * Decode the stored phys_json into the canonical structure. Backward
-     * compatible: older profiles stored a plain aligned array.
+     * compatible: older profiles stored a plain aligned array, and profiles
+     * saved before СМК-парсинга не имеют полей smk/ball.
      */
     public static function decode(?string $json, int $count): ?array {
         if ($json === null || trim($json) === '') return null;
@@ -187,6 +278,8 @@ final class Phys {
             'aligned' => $norm($data['aligned'] ?? [], null),
             'p'       => $norm($data['p'] ?? [], null),
             'sig'     => array_map('boolval', $norm($data['sig'] ?? [], false)),
+            'smk'     => array_map('strval', $norm($data['smk'] ?? [], '')),
+            'ball'    => $norm($data['ball'] ?? [], null),
             'rows'    => $data['rows'] ?? [],
             'error'   => isset($data['error']) && $data['error'] !== '' ? (string) $data['error'] : null,
         ];

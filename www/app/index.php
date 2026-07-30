@@ -227,7 +227,7 @@ function view_result(array $cfg, callable $h): void {
             <a class="btn sm danger" href="?p=interp_delete&interp=<?= (int)$it['id'] ?>" onclick="return confirm('Удалить интерпретацию? Действие необратимо.')">🗑</a>
           </span>
         </div>
-        <div class="interp"><?= Report::mdToHtml($it['content']) ?></div>
+        <div class="interp"><?= Report::interpToHtml($it['content']) ?></div>
       </div>
     <?php endforeach; ?>
     <?php
@@ -240,7 +240,7 @@ function view_report(array $cfg): void {
     $p = profile_row((int)$it['profile_id']);
     $prof = profile_decode($p);
     $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
-    $html = Report::html($prof, Report::mdToHtml($it['content']), $cfg, [
+    $html = Report::html($prof, Report::interpToHtml($it['content']), $cfg, [
         'phys' => $phys, 'autoprint' => !empty($_GET['print']),
     ]);
     header('Content-Type: text/html; charset=utf-8');
@@ -369,19 +369,9 @@ function act_phys_save(array $cfg): void {
     $prof = profile_decode($p);
     $count = count($prof['scores']);
     $old = Phys::decode($p['phys_json'] ?? null, $count);
-    $parsed = [
-        'aligned' => Phys::fromManual((array)($_POST['zna'] ?? []), $count),
-        'p'       => $old['p'] ?? array_fill(0, $count, null),
-        'sig'     => [],
-        'rows'    => $old['rows'] ?? [],
-        'error'   => null, // оператор поправил вручную — прежняя ошибка OCR снята
-    ];
-    $sigPost = (array)($_POST['sig'] ?? []);
-    for ($i = 0; $i < $count; $i++) {
-        $parsed['sig'][$i] = !empty($sigPost[$i]);
-        // Ручной флажок перекрывает распознанное p: снят — значит недостоверно.
-        if ($old !== null && $parsed['sig'][$i] !== ($old['sig'][$i] ?? false)) $parsed['p'][$i] = null;
-    }
+    // Правку ведёт Phys: распознанные p / СМК / «Балл» по остальным осям
+    // сохраняются, а флажок достоверности не обнуляет p, а задаёт его.
+    $parsed = Phys::fromManual((array)($_POST['zna'] ?? []), $count, (array)($_POST['sig'] ?? []), $old);
     Db::q('UPDATE profiles SET phys_json=?, status=? WHERE id=?',
         [json_encode($parsed, JSON_UNESCAPED_UNICODE), 'ready', $id]);
     redirect('?p=result&id=' . $id . '&ok=' . urlencode('Физиология сохранена.'));
@@ -395,9 +385,12 @@ function act_interpret(array $cfg): void {
     if (!$version) {
         redirect('?p=result&id=' . $id . '&err=' . urlencode('Для этой методики не выбран активный промпт (страница «Промпты»).'));
     }
+    // Нейросеть получает РАСЧЁТ (Metrics), а не сырой текст OCR: уровни,
+    // достоверность и разделы считает код, модель только пишет текст.
+    $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
     // Ошибку нейросети показываем на странице результата, а не голой 500-й.
     try {
-        $content = Interpret::run($prof, (string)$p['phys_ocr_text'], $version);
+        $content = Interpret::run($prof, $phys, $version);
     } catch (Throwable $e) {
         redirect('?p=result&id=' . $id . '&err=' . urlencode('Нейросеть недоступна, интерпретация не создана: ' . $e->getMessage()));
     }
@@ -413,7 +406,7 @@ function act_email(array $cfg): void {
     $p = profile_row($pid);
     $prof = profile_decode($p);
     $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
-    $html = Report::html($prof, Report::mdToHtml($it['content']), $cfg, ['phys' => $phys]);
+    $html = Report::html($prof, Report::interpToHtml($it['content']), $cfg, ['phys' => $phys]);
     $to = $cfg['ADMIN_EMAIL'] ?? '';
     if ($to === '') {
         redirect('?p=result&id=' . $pid . '&err=' . urlencode('Не задан адрес получателя (ADMIN_EMAIL в настройках /setup.php).'));
@@ -497,45 +490,53 @@ function profile_from_text(string $text, string $methodic): array {
             'score_max' => Profile::scoreMax($scores, $key)];
 }
 
-/** @param array|null $phys структура Phys::decode (aligned + sig) или null */
+/** @param array|null $phys структура Phys::decode (aligned + p + sig) или null */
 function cognitive_svg(array $prof, ?array $phys = null): string {
-    $labels = array_map(fn ($s) => Profile::shortLabel($s['label']), $prof['scores']);
-    $cog = array_map(fn ($s) => (float) $s['score'], $prof['scores']);
-    return Chart::svg($labels, $cog, (int)($prof['score_max'] ?? 10), $phys['aligned'] ?? null, [
+    return Chart::fromMetrics(Metrics::build($prof, $phys), [
         'title' => Profile::chartTitle((string)($prof['test_key'] ?? '')),
         'size' => 560,
-        'phys_sig' => $phys['sig'] ?? [],
     ]);
 }
 
 /**
- * Таблица распознанной физиологии («Знач.» + достоверность) с ручной правкой.
- * Строки с p<0.05 — жирные; нераспознанные значения — прочерк (пустое поле).
+ * Таблица разобранной физиологии с ручной правкой + ПОСЧИТАННЫЕ уровень,
+ * положение относительно медианы и раздел отчёта. Оператор видит ровно то, что
+ * уйдёт в отчёт и в нейросеть, и может поправить «Знач.»/достоверность до
+ * интерпретации. Строки с p<0.05 — жирные; пустое поле = данных нет.
  */
 function phys_table_form(array $prof, ?array $phys, int $id, callable $h): string {
     if ($phys === null) return '';
+    $m = Metrics::build($prof, $phys);
     ob_start(); ?>
     <div class="card">
-      <h2>Физиология — «Знач.» со скриншота значимости</h2>
-      <p class="muted">Проверьте распознанные значения и достоверность; при необходимости поправьте и сохраните.
-      Пустое поле = данных нет (ось останется без точки).</p>
+      <h2>Расчёт по шкалам — проверьте перед интерпретацией</h2>
+      <p class="muted">«Знач.» и достоверность распознаны со скриншота; уровень, положение
+      относительно медианы и раздел отчёта считает сервис (не нейросеть).
+      Поправьте значения при необходимости и сохраните. Шкала физиологии на
+      диаграмме: ±<?= $h(Metrics::num($m['phys_scale'])) ?>.</p>
+      <?php foreach ($m['warnings'] as $w): ?><div class="msg warn">⚠ <?= $h($w) ?></div><?php endforeach; ?>
       <form method="post" action="?p=phys_save">
         <input type="hidden" name="id" value="<?= $id ?>">
         <table class="grid">
-          <tr><th>Ось</th><th>Знач.</th><th>Достоверность</th><th>p&lt;0.05</th></tr>
-          <?php foreach ($prof['scores'] as $i => $s):
-              $v = $phys['aligned'][$i] ?? null;
-              $pv = $phys['p'][$i] ?? null;
-              $sig = !empty($phys['sig'][$i]); ?>
-          <tr<?= $sig ? ' class="sig"' : '' ?>>
-            <td><?= $h($s['label']) ?></td>
-            <td><input class="num" type="text" name="zna[<?= $i ?>]" value="<?= $v === null ? '' : $h(rtrim(rtrim(number_format((float)$v, 1, '.', ''), '0'), '.')) ?>" placeholder="—"></td>
-            <td><?= $pv === null ? '<span class="muted">—</span>' : $h(($pv < Phys::SIG ? 'p<' : 'p>') . '0.05') ?></td>
-            <td><input type="checkbox" name="sig[<?= $i ?>]" value="1" <?= $sig ? 'checked' : '' ?>></td>
+          <tr><th>Шкала</th><th>Балл</th><th>Уровень</th><th>Знач.</th><th>p&lt;0.05</th>
+              <th>Физиология</th><th>СМК</th><th>Раздел отчёта</th></tr>
+          <?php foreach ($m['axes'] as $i => $a):
+              $v = $a['zna']; ?>
+          <tr<?= $a['sig'] ? ' class="sig"' : '' ?>>
+            <td><?= $h($a['label']) ?></td>
+            <td class="num"><?= $h(Metrics::num($a['score'])) ?> из <?= (int)$a['scale_max'] ?>
+                <span class="muted">(<?= $h(Metrics::num($a['pct'])) ?>%)</span></td>
+            <td><?= $h($a['level_label']) ?>, <?= $h($a['rank_label']) ?></td>
+            <td><input class="num" type="text" name="zna[<?= $i ?>]" value="<?= $v === null ? '' : $h(Metrics::num((float)$v)) ?>" placeholder="—"></td>
+            <td><input type="checkbox" name="sig[<?= $i ?>]" value="1" <?= $a['sig'] ? 'checked' : '' ?>>
+                <span class="muted"><?= $h($a['p_label']) ?></span></td>
+            <td><?= $h($a['phys_label']) ?></td>
+            <td><?= $h($a['smk'] ?: '—') ?></td>
+            <td><?= $h($a['category_title'] ?: 'не упоминается') ?></td>
           </tr>
           <?php endforeach; ?>
         </table>
-        <button class="btn sm" type="submit">Сохранить физиологию</button>
+        <button class="btn sm" type="submit">Сохранить и пересчитать</button>
       </form>
     </div>
     <?php
