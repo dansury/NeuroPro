@@ -45,6 +45,36 @@ if (!function_exists('cfg_load_env_file')) {
 }
 cfg_load_env_file();
 
+// Чтение .env без побочных эффектов: возвращает ['file' => путь, 'vars' => [...]]
+// или null, если файл не найден. Используется setup.php → «Зеркалировать .env
+// в настройки». Логика поиска файла — та же, что в cfg_load_env_file().
+if (!function_exists('cfg_read_env_file')) {
+    function cfg_read_env_file(): ?array {
+        $webroot = dirname(__DIR__);
+        $candidates = array_filter([
+            getenv('NP_ENV_FILE') ?: null,
+            dirname($webroot) . '/.env',
+            $webroot . '/.env',
+        ]);
+        foreach ($candidates as $file) {
+            if (!is_file($file) || !is_readable($file)) continue;
+            $pairs = [];
+            foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                $line = trim($line);
+                if ($line === '' || $line[0] === '#' || !str_contains($line, '=')) continue;
+                [$k, $v] = explode('=', $line, 2);
+                $k = trim($k);
+                $v = trim((string) preg_replace('/\s+#.*$/', '', $v));
+                $v = trim($v, "\"'");
+                if ($k === '') continue;
+                $pairs[$k] = $v;
+            }
+            return ['file' => $file, 'vars' => $pairs];
+        }
+        return null;
+    }
+}
+
 if (!function_exists('cfg_env')) {
     function cfg_env(string $key, ?string $default = null): ?string {
         $v = getenv($key);
