@@ -29,15 +29,16 @@
 require_once __DIR__ . '/metrics.php';
 
 final class Chart {
-    // Brand palette derived from the NeuroPro logo (crimson) + reference teal.
-    private const COG_STROKE = '#b3203b';   // cognitive polygon (crimson)
-    private const COG_FILL   = '#b3203b';
+    // Ответы теста — синие, физиологический ответ — оранжевый (по просьбе
+    // заказчика; синий совпадает с осью X матрицы, оранжевый — с параметром Y).
+    private const COG_STROKE = '#2f6fd0';   // cognitive polygon (blue)
+    private const COG_FILL   = '#2f6fd0';
     private const COG_OPACITY = '0.16';
-    private const COG_TEXT   = '#8f1a30';   // подписи баллов у точек
-    private const PHYS_STROKE = '#1f9da8';  // physiological polygon (teal)
-    private const PHYS_FILL  = '#1f9da8';
-    private const PHYS_OPACITY = '0.22';
-    private const PHYS_TEXT  = '#127680';   // подписи Знач. у точек
+    private const COG_TEXT   = '#24549c';   // подписи баллов у точек
+    private const PHYS_STROKE = '#e8850c';  // physiological polygon (orange)
+    private const PHYS_FILL  = '#e8850c';
+    private const PHYS_OPACITY = '0.20';
+    private const PHYS_TEXT  = '#b8660a';   // подписи Знач. у точек
     private const GRID       = '#e2e7ec';
     private const GRID_OUTER = '#c9d2da';
     private const MEDIAN     = '#9fb4bd';   // кольцо медианы физиологии
@@ -204,13 +205,16 @@ final class Chart {
                    . 'font-size="10" fill="' . self::COG_TEXT . '">' . round((float) ($cogPct[$i] ?? 0)) . '%</text>';
         }
 
-        // Legend + пояснение обеих шкал.
+        // Legend + пояснение обеих шкал. Квадратик легенды вертикально центрируем
+        // по базовой линии текста (раньше физиологический квадрат «съезжал» вниз).
         $ly = $size - ($hasPhys ? 34 : 16);
-        $svg[] = '<rect x="' . ($cx - 175) . '" y="' . ($ly - 11) . '" width="13" height="13" fill="' . self::COG_STROKE . '"/>';
+        $sq = 12;                 // сторона квадрата
+        $sqY = $ly - 10;          // верх квадрата: середина совпадает с серединой текста
+        $svg[] = '<rect x="' . ($cx - 175) . '" y="' . $sqY . '" width="' . $sq . '" height="' . $sq . '" fill="' . self::COG_STROKE . '"/>';
         $svg[] = '<text x="' . ($cx - 157) . '" y="' . $ly . '" font-size="12" fill="' . self::TEXT . '">Ответы теста (% от максимума шкалы)</text>';
         if ($hasPhys) {
-            $svg[] = '<rect x="' . ($cx + 78) . '" y="' . ($ly - 11) . '" width="13" height="13" fill="' . self::PHYS_STROKE . '" fill-opacity="0.55" stroke="' . self::PHYS_STROKE . '"/>';
-            $svg[] = '<text x="' . ($cx + 96) . '" y="' . $ly . '" font-size="12" fill="' . self::TEXT . '">Физиология</text>';
+            $svg[] = '<rect x="' . ($cx + 78) . '" y="' . $sqY . '" width="' . $sq . '" height="' . $sq . '" fill="' . self::PHYS_FILL . '" fill-opacity="0.55" stroke="' . self::PHYS_STROKE . '"/>';
+            $svg[] = '<text x="' . ($cx + 96) . '" y="' . $ly . '" font-size="12" fill="' . self::TEXT . '">Физиологический ответ</text>';
             $svg[] = '<text x="' . $cx . '" y="' . ($size - 18) . '" text-anchor="middle" font-size="10" fill="#8a949d">'
                    . 'Физиология: «Знач.» на шкале ±' . self::num($physScale)
                    . ', пунктир (50 %) — медиана; наружу — напряжение, к центру — его нет.</text>';

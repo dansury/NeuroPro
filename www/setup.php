@@ -167,7 +167,7 @@ if ($method === 'POST') {
             'LLM_PROVIDER', 'LLM_PROVIDER_PRIORITY', 'LLM_DEFAULT_MODEL',
             'LLM_FALLBACK_MODELS',
             'LLM_VISION_MODEL', 'LLM_FALLBACK_MODEL', 'YANDEX_FALLBACK_MODEL',
-            'LLM_OCR_MODELS', 'YANDEX_OCR_MODEL',
+            'LLM_OCR_MODELS', 'SCREENSHOT_MODEL', 'YANDEX_OCR_MODEL',
             'OPENROUTER_API_KEY', 'YANDEX_API_KEY', 'YANDEX_FOLDER_ID',
             'ADMIN_EMAIL', 'ERROR_EMAIL',
             'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME',
@@ -289,6 +289,7 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
   <label><span>OpenRouter fallback-модель</span><input type="text" name="LLM_FALLBACK_MODEL" placeholder="<?= $h($eff('LLM_FALLBACK_MODEL') ?: 'openrouter/auto') ?>"></label>
   <label><span>Yandex fallback-модель (full_id без gpt://)</span><input type="text" name="YANDEX_FALLBACK_MODEL" placeholder="<?= $h($eff('YANDEX_FALLBACK_MODEL') ?: 'yandexgpt') ?>"></label>
   <label><span>OCR-модели OpenRouter (через запятую, по порядку)</span><input type="text" name="LLM_OCR_MODELS" placeholder="<?= $h($ocr_models_eff ?: 'google/gemini-2.5-flash,google/gemini-2.0-flash-001') ?>"></label>
+  <label><span>Модель распознавания скриншота значимости (vision, OpenRouter full_id) — смотрит на графики, а не на OCR-текст</span><input type="text" name="SCREENSHOT_MODEL" placeholder="<?= $h($eff('SCREENSHOT_MODEL') ?: 'google/gemini-2.5-flash') ?>"></label>
   <label><span>Yandex Vision OCR модель</span><input type="text" name="YANDEX_OCR_MODEL" placeholder="<?= $h($eff('YANDEX_OCR_MODEL') ?: 'page') ?>"></label>
   <label style="display:flex;align-items:center;gap:8px;">
     <input type="checkbox" name="YANDEX_OCR_ENABLED" value="1" style="width:auto;" <?= $eff('YANDEX_OCR_ENABLED') === '1' ? 'checked' : '' ?>>

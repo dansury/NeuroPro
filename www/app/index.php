@@ -35,8 +35,10 @@ try {
         case 'prompts':       view_prompts($cfg, $h); break;
         case 'prompt_edit':   $method === 'POST' ? act_prompt_save($cfg) : view_prompt_edit($cfg, $h); break;
         case 'prompt_delete': act_prompt_delete($cfg); break;
+        case 'prompt_family_delete': act_prompt_family_delete($cfg); break;
         case 'interp_block':  act_interp_block($cfg); break;
         case 'interp_delete': act_interp_delete($cfg); break;
+        case 'profile_delete': act_profile_delete($cfg); break;
         default:              view_dashboard($cfg, $h);
     }
 } catch (Throwable $e) {
@@ -57,7 +59,8 @@ function view_dashboard(array $cfg, callable $h): void {
       <table class="grid"><tr><th>ФИО</th><th>Методика</th><th>Дата</th><th></th></tr>
       <?php foreach ($awaiting as $p): ?>
         <tr><td><?= $h($p['name']) ?></td><td><?= $h($p['methodic']) ?></td><td><?= $h($p['test_date']) ?></td>
-        <td><a class="btn sm" href="?p=profile&id=<?= (int)$p['id'] ?>">Добавить скриншот →</a></td></tr>
+        <td><a class="btn sm" href="?p=profile&id=<?= (int)$p['id'] ?>">Добавить скриншот →</a>
+        <a class="btn sm danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ? Действие необратимо.')">🗑</a></td></tr>
       <?php endforeach; ?></table>
     <?php endif; ?>
     <h2>Готовые профили</h2>
@@ -66,13 +69,21 @@ function view_dashboard(array $cfg, callable $h): void {
         $c = Db::one('SELECT COUNT(*) c FROM interpretations WHERE profile_id=?', [$p['id']]); ?>
       <tr><td><?= $h($p['name']) ?></td><td><?= $h($p['methodic']) ?></td><td><?= $h($p['status']) ?></td>
       <td><?= (int)($c['c'] ?? 0) ?></td>
-      <td><a class="btn sm" href="?p=result&id=<?= (int)$p['id'] ?>">Открыть →</a></td></tr>
+      <td><a class="btn sm" href="?p=result&id=<?= (int)$p['id'] ?>">Открыть →</a>
+      <a class="btn sm danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ и все его интерпретации? Действие необратимо.')">🗑</a></td></tr>
     <?php endforeach; ?></table>
     <?php
     layout('Дашборд', ob_get_clean(), $h);
 }
 
 function view_upload(array $cfg, callable $h): void {
+    // Список методик — из известных типов тестов + уже встречавшихся в базе (#4).
+    $methodics = [];
+    foreach (Profile::TEST_TYPES as $info) $methodics[$info['label']] = true;
+    foreach (Db::all("SELECT DISTINCT methodic FROM profiles WHERE methodic IS NOT NULL AND methodic<>'' ORDER BY methodic") as $r) {
+        $methodics[(string)$r['methodic']] = true;
+    }
+    $methodics = array_keys($methodics);
     ob_start(); ?>
     <h1>Загрузка профиля</h1>
     <form method="post" enctype="multipart/form-data" class="card">
@@ -82,7 +93,12 @@ function view_upload(array $cfg, callable $h): void {
       <label><span>Вставить данные как текст (CSV/TSV: № , параметр , балл)</span>
         <textarea name="pasted" rows="8" placeholder="1, Познавательный мотив, 9&#10;2, Состязательный мотив, 9 ..."></textarea></label>
       <label><span>Методика (если вставляете текстом)</span>
-        <input type="text" name="methodic" placeholder="Структура мотивации участия (СМУ)"></label>
+        <select name="methodic">
+          <option value="">— выберите методику —</option>
+          <?php foreach ($methodics as $mname): ?>
+            <option value="<?= $h($mname) ?>"><?= $h($mname) ?></option>
+          <?php endforeach; ?>
+        </select></label>
       <button class="btn" type="submit">Загрузить</button>
     </form>
     <div class="card">
@@ -205,9 +221,14 @@ function view_result(array $cfg, callable $h): void {
     // показывать одни и те же числа — и незачем считать их трижды.
     $m = Metrics::build($prof, $phys);
     $svg = cognitive_svg($prof, $phys, $m);
-    $matrix = Matrix::svg($m, ['width' => 900]);
     $interps = Db::all('SELECT i.*, v.version_no FROM interpretations i JOIN prompt_versions v ON v.id=i.prompt_version_id WHERE i.profile_id=? ORDER BY i.created_at DESC', [$p['id']]);
+    // Интерактивная матрица: математика всегда, плюс фрагмент интерпретации по
+    // каждой шкале, если она уже сделана (последняя по времени) — #9.
+    $matrix = Matrix::interactiveHtml($m, (string)($interps[0]['content'] ?? ''), ['width' => 900]);
     $active = Prompts::activeVersion($prof['test_key']);
+    // Список версий промптов для выбора вручную, если активная не задана (#8).
+    $fam = Prompts::family($prof['test_key']);
+    $famVersions = $fam ? Prompts::versions((int)$fam['id']) : [];
     ob_start(); ?>
     <h1><?= $h($prof['name']) ?> <span class="muted">— <?= $h($prof['methodic']) ?></span></h1>
     <?php if ($phys !== null && $phys['error'] !== null): ?>
@@ -222,14 +243,32 @@ function view_result(array $cfg, callable $h): void {
       <div class="card">
         <div class="chart"><?= $matrix ?></div>
         <?= Matrix::legendHtml($m) ?>
-        <p class="muted">Ровно эта матрица уходит в отчёт клиента вместо таблиц.</p>
+        <p class="muted">Эта же матрица уходит в отчёт клиента вместо таблиц (в PDF/письме — статичная).</p>
       </div>
     <?php endif; ?>
-    <?= phys_table_form($prof, $phys, (int)$p['id'], $h, $m) ?>
+    <?= phys_table_form($prof, $phys, (int)$p['id'], $h, $m, (string)($p['phys_image'] ?? '')) ?>
     <form method="post" action="?p=interpret" class="row">
       <input type="hidden" name="id" value="<?= (int)$p['id'] ?>">
-      <button class="btn" type="submit" <?= $active ? '' : 'disabled' ?>>▶ Сделать интерпретацию (промпт <?= $active ? 'v'.$h($active['version_no']).', '.$h($active['model_id']) : 'не выбран' ?>)</button>
-      <a class="btn ghost" href="?p=profile&id=<?= (int)$p['id'] ?>">Заменить скриншот</a>
+      <span class="row" style="justify-content:flex-start;flex-wrap:wrap">
+      <?php if ($active): ?>
+        <button class="btn" type="submit">▶ Сделать интерпретацию (промпт v<?= $h($active['version_no']) ?>, <?= $h($active['model_id']) ?>)</button>
+      <?php elseif ($famVersions): ?>
+        <span class="muted">Промпт не выбран — выберите:</span>
+        <select name="version_id">
+          <?php foreach ($famVersions as $v): ?>
+            <option value="<?= (int)$v['id'] ?>">v<?= $h($v['version_no']) ?> — <?= $h($v['model_id']) ?><?= $v['comment'] ? ' · '.$h($v['comment']) : '' ?></option>
+          <?php endforeach; ?>
+        </select>
+        <button class="btn" type="submit">▶ Сделать интерпретацию</button>
+      <?php else: ?>
+        <button class="btn" type="submit" disabled>▶ Сделать интерпретацию (промпт не выбран)</button>
+        <a class="btn ghost" href="?p=prompts">Создать промпт →</a>
+      <?php endif; ?>
+      </span>
+      <span class="row" style="justify-content:flex-end;gap:8px">
+        <a class="btn ghost" href="?p=profile&id=<?= (int)$p['id'] ?>">Заменить скриншот</a>
+        <a class="btn ghost danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ и все его интерпретации? Действие необратимо.')">🗑 Удалить анализ</a>
+      </span>
     </form>
     <?php foreach ($interps as $it): ?>
       <div class="card">
@@ -336,7 +375,10 @@ function view_prompts(array $cfg, callable $h): void {
     <h1>Промпты</h1>
     <?php foreach (Prompts::allFamilies() as $f): ?>
       <div class="card">
-        <h2><?= $h($f['name']) ?> <span class="muted">[<?= $h($f['test_key']) ?>]</span></h2>
+        <div class="row"><h2><?= $h($f['name']) ?> <span class="muted">[<?= $h($f['test_key']) ?>]</span></h2>
+          <a class="btn sm danger" href="?p=prompt_family_delete&id=<?= (int)$f['id'] ?>"
+             onclick="return confirm('Удалить всё семейство промптов «<?= $h($f['name']) ?>» вместе со всеми версиями и интерпретациями? При следующем запуске оно пересоздастся с чистой версией v1.')">🗑 Удалить методику</a>
+        </div>
         <table class="grid"><tr><th>Версия</th><th>Модель</th><th>Комментарий</th><th>Интерпретаций</th><th>Активна</th><th></th></tr>
         <?php foreach (Prompts::versions((int)$f['id']) as $v):
             $isActive = (int)$f['active_version_id'] === (int)$v['id']; ?>
@@ -350,6 +392,9 @@ function view_prompts(array $cfg, callable $h): void {
               <a class="btn sm" href="?p=prompt_edit&id=<?= (int)$f['id'] ?>&v=<?= (int)$v['id'] ?>">Открыть</a>
               <?php if ((int)$v['interp_count'] === 0 && !$isActive): ?>
                 <a class="btn sm danger" href="?p=prompt_delete&v=<?= (int)$v['id'] ?>" onclick="return confirm('Удалить версию промпта?')">🗑</a>
+              <?php else: ?>
+                <a class="btn sm danger" href="?p=prompt_delete&v=<?= (int)$v['id'] ?>&force=1"
+                   onclick="return confirm('Удалить версию v<?= $h($v['version_no']) ?>? <?= (int)$v['interp_count'] > 0 ? 'Будут удалены и '.(int)$v['interp_count'].' связанных интерпретаций. ' : '' ?><?= $isActive ? 'Это активная версия — активной станет другая (или ни одна). ' : '' ?>Действие необратимо.')">🗑</a>
               <?php endif; ?>
             </td>
           </tr>
@@ -430,21 +475,46 @@ function act_screenshot(array $cfg): void {
     if ($bytes === null) {
         redirect('?p=profile&id=' . $id . '&err=' . urlencode('Скриншот не передан: вставьте изображение (Ctrl+V) или выберите файл.'));
     }
-    // Ошибку OCR не глушим: сохраняем в профиль и показываем оператору —
-    // «все ошибки обязательно выводить». Профиль при этом остаётся рабочим.
-    $ocrText = '';
-    $ocrError = null;
-    try { $ocrText = LLM::ocrImage($bytes, $mime); }
-    catch (Throwable $e) { $ocrError = $e->getMessage(); }
     $labels = array_map(fn ($s) => $s['label'], $prof['scores']);
-    $parsed = Phys::parse($ocrText, $labels);
-    if ($ocrError !== null) {
-        $parsed['error'] = 'OCR недоступен: ' . $ocrError;
-    } elseif (!Phys::hasData($parsed)) {
-        $parsed['error'] = 'OCR отработал, но ни одно значение «Знач.» не сопоставлено с осями. Распознанный текст сохранён (см. лог), значения можно ввести вручную.';
+    // Сам скриншот сохраняем как data URI — оператор сверяет цифры с графиками
+    // рядом с таблицей расчёта (см. phys_table_form).
+    $image = 'data:' . $mime . ';base64,' . base64_encode($bytes);
+
+    // Ошибку распознавания не глушим: сохраняем в профиль и показываем оператору
+    // — «все ошибки обязательно выводить». Профиль при этом остаётся рабочим.
+    // Основной путь — ОТДЕЛЬНАЯ vision-модель, которая смотрит на графики
+    // (LLM::recognizeSignificance): плоский OCR не различал знак «Знач.» по
+    // положению столбика. Yandex OCR остаётся запасным вариантом.
+    $ocrText = '';
+    $parsed = null;
+    $errParts = [];
+    try {
+        $rec = LLM::recognizeSignificance($bytes, $mime, $labels);
+        $ocrText = $rec['raw'];
+        $parsed = Phys::fromVision($rec['rows'], $labels);
+    } catch (Throwable $e) {
+        $errParts[] = 'vision: ' . $e->getMessage();
     }
-    Db::q('UPDATE profiles SET phys_ocr_text=?, phys_json=?, status=? WHERE id=?',
-        [$ocrText, json_encode($parsed, JSON_UNESCAPED_UNICODE), 'ready', $id]);
+    // Запасной путь: Yandex OCR + эвристический разбор столбцов.
+    if ($parsed === null || !Phys::hasData($parsed)) {
+        try {
+            $ocrText = LLM::ocrImage($bytes, $mime);
+            $fallback = Phys::parse($ocrText, $labels);
+            if (Phys::hasData($fallback)) $parsed = $fallback;
+            elseif ($parsed === null) $parsed = $fallback;
+        } catch (Throwable $e) {
+            $errParts[] = 'ocr: ' . $e->getMessage();
+        }
+    }
+    if ($parsed === null) {
+        $parsed = Phys::parse('', $labels);
+        $parsed['error'] = 'Распознавание недоступно (' . implode(' | ', $errParts) . '). Значения можно ввести вручную ниже.';
+    } elseif (!Phys::hasData($parsed)) {
+        $parsed['error'] = 'Скриншот распознан, но ни одно значение «Знач.» не сопоставлено с осями'
+            . ($errParts ? ' (' . implode(' | ', $errParts) . ')' : '') . '. Введите значения вручную ниже.';
+    }
+    Db::q('UPDATE profiles SET phys_ocr_text=?, phys_json=?, phys_image=?, status=? WHERE id=?',
+        [$ocrText, json_encode($parsed, JSON_UNESCAPED_UNICODE), $image, 'ready', $id]);
     redirect('?p=result&id=' . $id . ($parsed['error'] !== null ? '&err=' . urlencode($parsed['error']) : ''));
 }
 
@@ -467,9 +537,12 @@ function act_interpret(array $cfg): void {
     $id = (int)($_POST['id'] ?? 0);
     $p = profile_row($id);
     $prof = profile_decode($p);
-    $version = Prompts::activeVersion($prof['test_key']);
+    // Оператор мог выбрать версию вручную (#8), иначе — активная версия методики.
+    $vid = (int)($_POST['version_id'] ?? 0);
+    $version = $vid ? Prompts::version($vid) : null;
+    if (!$version) $version = Prompts::activeVersion($prof['test_key']);
     if (!$version) {
-        redirect('?p=result&id=' . $id . '&err=' . urlencode('Для этой методики не выбран активный промпт (страница «Промпты»).'));
+        redirect('?p=result&id=' . $id . '&err=' . urlencode('Для этой методики не выбран промпт (страница «Промпты»).'));
     }
     // Нейросеть получает РАСЧЁТ (Metrics), а не сырой текст OCR: уровни,
     // достоверность и разделы считает код, модель только пишет текст.
@@ -514,8 +587,8 @@ function act_prompt_save(array $cfg): void {
 }
 
 function act_prompt_delete(array $cfg): void {
-    $res = Prompts::deleteVersion((int)($_GET['v'] ?? 0));
-    redirect('?p=prompts' . ($res['ok'] ? '' : '&err=' . urlencode($res['error'])));
+    $res = Prompts::deleteVersion((int)($_GET['v'] ?? 0), !empty($_GET['force']));
+    redirect('?p=prompts' . ($res['ok'] ? '&ok=' . urlencode('Версия промпта удалена.') : '&err=' . urlencode($res['error'])));
 }
 
 /**
@@ -548,6 +621,22 @@ function act_interp_delete(array $cfg): void {
     $it = Db::one('SELECT profile_id FROM interpretations WHERE id=?', [(int)($_GET['interp'] ?? 0)]);
     Db::q('DELETE FROM interpretations WHERE id=?', [(int)($_GET['interp'] ?? 0)]);
     redirect('?p=result&id=' . (int)($it['profile_id'] ?? 0));
+}
+
+/** Удаление анализа (профиля) целиком: интерпретации уходят каскадом (FK). */
+function act_profile_delete(array $cfg): void {
+    $id = (int)($_GET['id'] ?? 0);
+    profile_row($id); // 404, если профиля нет
+    Db::q('DELETE FROM interpretations WHERE profile_id=?', [$id]);
+    Db::q('DELETE FROM profiles WHERE id=?', [$id]);
+    redirect('?p=dashboard&ok=' . urlencode('Анализ удалён.'));
+}
+
+/** Удаление семейства промптов целиком (со всеми версиями и интерпретациями). */
+function act_prompt_family_delete(array $cfg): void {
+    $famId = (int)($_GET['id'] ?? 0);
+    $res = Prompts::deleteFamily($famId);
+    redirect('?p=prompts' . ($res['ok'] ? '&ok=' . urlencode('Семейство промптов удалено.') : '&err=' . urlencode($res['error'])));
 }
 
 /* ─────────────────────────── Helpers ─────────────────────────── */
@@ -619,7 +708,7 @@ function cognitive_svg(array $prof, ?array $phys = null, ?array $metrics = null)
  * уйдёт в отчёт и в нейросеть, и может поправить «Знач.»/достоверность до
  * интерпретации. Строки с p<0.05 — жирные; пустое поле = данных нет.
  */
-function phys_table_form(array $prof, ?array $phys, int $id, callable $h, ?array $metrics = null): string {
+function phys_table_form(array $prof, ?array $phys, int $id, callable $h, ?array $metrics = null, string $image = ''): string {
     if ($phys === null) return '';
     $m = $metrics ?? Metrics::build($prof, $phys);
     ob_start(); ?>
@@ -629,6 +718,12 @@ function phys_table_form(array $prof, ?array $phys, int $id, callable $h, ?array
       относительно медианы и раздел отчёта считает сервис (не нейросеть).
       Поправьте значения при необходимости и сохраните. Шкала физиологии на
       диаграмме: ±<?= $h(Metrics::num($m['phys_scale'])) ?>.</p>
+      <?php if ($image !== ''): ?>
+        <div class="shot">
+          <p class="muted">Исходный скриншот значимости — сверьте цифры ниже с положением графиков:</p>
+          <img src="<?= $h($image) ?>" alt="Скриншот таблицы значимости">
+        </div>
+      <?php endif; ?>
       <?php foreach ($m['warnings'] as $w): ?><div class="msg warn">⚠ <?= $h($w) ?></div><?php endforeach; ?>
       <form method="post" action="?p=phys_save">
         <input type="hidden" name="id" value="<?= $id ?>">
@@ -714,6 +809,7 @@ function layout(string $title, string $body, callable $h): void {
   .chart{text-align:center} .chart svg{max-width:100%;height:auto}
   .legend{color:#6b7682;font-size:11px;line-height:1.6}
   .paste{border:2px dashed #cfd6dd;border-radius:6px;padding:24px;text-align:center;color:#8a949d;cursor:text}
+  .shot img{max-width:100%;border:1px solid #d7dde3;border-radius:6px;margin:4px 0 10px}
   .interp h1,.interp h2,.interp h3{color:#b3203b}
   .interp.editable .np-block{border:1px solid transparent;border-radius:5px;padding:1px 6px;margin:0 -6px;cursor:text}
   .interp.editable .np-block:hover{border-color:#e0e5ea;background:#fbfcfd}

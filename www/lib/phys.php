@@ -126,6 +126,77 @@ final class Phys {
         return $out;
     }
 
+    /**
+     * Выравнивание структурированных строк vision-распознавания (LLM::recognizeSignificance)
+     * по осям профиля. В отличие от parse() здесь не гадаем по столбцам — знак и
+     * величина «Знач.» уже сверены моделью с графиком; наша задача только
+     * сопоставить строку модели с нужной осью (по ключевому слову подписи).
+     *
+     * @param array $rows   строки из LLM::recognizeSignificance()['rows']
+     * @param array $labels подписи осей профиля (порядок и состав)
+     */
+    public static function fromVision(array $rows, array $labels): array {
+        $n = count($labels);
+        $out = [
+            'aligned' => array_fill(0, $n, null),
+            'p'       => array_fill(0, $n, null),
+            'sig'     => array_fill(0, $n, false),
+            'smk'     => array_fill(0, $n, ''),
+            'ball'    => array_fill(0, $n, null),
+            'rows'    => [],
+            'error'   => null,
+        ];
+        // Индекс строк модели по ключевому слову их подписи.
+        $byKey = [];
+        foreach ($rows as $r) {
+            $key = self::keyword((string) ($r['label'] ?? ''));
+            if ($key !== '') $byKey[$key] = $r;
+        }
+        foreach ($labels as $idx => $label) {
+            $r = null;
+            $key = self::keyword((string) $label);
+            // 1) точное совпадение по ключевому слову; 2) вхождение ключа оси в
+            //    подпись модели (или наоборот) — OCR/модель могут обрезать слово.
+            if ($key !== '' && isset($byKey[$key])) {
+                $r = $byKey[$key];
+            } else {
+                foreach ($rows as $cand) {
+                    $cl = mb_strtolower((string) ($cand['label'] ?? ''));
+                    if ($key !== '' && ($cl !== '' && (mb_stripos($cl, $key) !== false))) { $r = $cand; break; }
+                }
+            }
+            // 3) позиционный резерв: модель обычно сохраняет порядок ожидаемых шкал.
+            if ($r === null && isset($rows[$idx]) && is_array($rows[$idx])) $r = $rows[$idx];
+            if ($r === null) continue;
+
+            $zna = isset($r['zna']) && is_numeric($r['zna']) ? (float) $r['zna'] : null;
+            $p   = null;
+            if (isset($r['p']) && $r['p'] !== null && $r['p'] !== '') {
+                foreach (self::allPValues('p' . (string) $r['p']) as $pv) { $p = $pv; break; }
+            }
+            $sig = !empty($r['sig']) || ($p !== null && $p < self::SIG);
+            if ($sig && $p === null) $p = self::SIG - 0.001;
+            $out['aligned'][$idx] = $zna;
+            $out['p'][$idx] = $p;
+            $out['sig'][$idx] = $sig;
+            $out['smk'][$idx] = self::normalizeSmk((string) ($r['smk'] ?? ''));
+            $out['ball'][$idx] = isset($r['ball']) && is_numeric($r['ball']) ? (float) $r['ball'] : null;
+            $out['rows'][$idx] = [
+                'label' => $label, 'zna' => $zna, 'p' => $p,
+                'smk' => $out['smk'][$idx], 'ball' => $out['ball'][$idx], 'raw' => 'vision',
+            ];
+        }
+        ksort($out['rows']);
+        $out['rows'] = array_values($out['rows']);
+        return $out;
+    }
+
+    /** Нормализация СМК-токена из vision-ответа (кириллические двойники X/Y/Z). */
+    private static function normalizeSmk(string $smk): string {
+        $norm = str_replace(['Х', 'х', 'У', 'у', 'Ζ', 'x', 'y', 'z', '≥'], ['X', 'X', 'Y', 'Y', 'Z', 'X', 'Y', 'Z', '>'], $smk);
+        return trim($norm);
+    }
+
     /** Most distinctive token of a label (longest non-stopword). */
     private static function keyword(string $label): string {
         $best = '';

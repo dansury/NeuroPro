@@ -32,12 +32,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/metrics.php';
 
 final class Matrix {
-    /** Цвета доминирующего параметра СМК. */
-    private const C_Y = '#d3352f';   // эмоциональный отклик — красный
+    /** Цвета параметров СМК (секторы кружка). Y — оранжевый (по просьбе заказчика). */
+    private const C_Y = '#e8850c';   // эмоциональный отклик — оранжевый
     private const C_X = '#2f6fd0';   // психическое напряжение — синий
     private const C_Z = '#2e9e5b';   // мышечная реакция — зелёный
     private const C_NONE = '#7d8a97'; // СМК не распознан — нейтральный серо-синий
-    private const C_FLAT = '#bfc9d2'; // низкая выраженность без отклика — бледный
+    private const C_FLAT = '#c2ccd4'; // низкая выраженность без отклика — бледный серый
 
     private const GRID = '#eaeef2';
     private const AXIS = '#c9d2da';
@@ -50,13 +50,13 @@ final class Matrix {
     private const R_MIN = 5.0;
     private const R_MAX = 17.0;
 
-    /** Легенда цветов: доминирующий параметр СМК + два служебных случая. */
+    /** Легенда: параметры СМК как секторы кружка + служебные случаи. */
     private const LEGEND = [
         [self::C_Y, 'Y — эмоциональный отклик'],
         [self::C_X, 'X — психическое напряжение'],
         [self::C_Z, 'Z — мышечная реакция'],
         [self::C_NONE, 'параметр не распознан'],
-        [self::C_FLAT, 'низкая выраженность без отклика'],
+        [self::C_FLAT, 'фон: не разбирается в отчёте'],
     ];
 
     /**
@@ -69,6 +69,10 @@ final class Matrix {
 
         $W = (int) ($opts['width'] ?? 640);
         $title = (string) ($opts['title'] ?? 'Матрица показателей: ответы теста × телесный отклик');
+        // Интерпретация по шкалам (label => фрагмент текста): подставляет
+        // interactiveHtml(), чтобы кружок при наведении показывал и математику,
+        // и интерпретацию (#9). В статичном SVG (PDF) карта пуста.
+        $interp = (array) ($opts['interp'] ?? []);
         $physScale = (float) ($metrics['phys_scale'] ?? 0.0);
         $midBand = (float) ($metrics['mid_band'] ?? Metrics::MID_BAND_MIN);
         $hasPhys = !empty($metrics['has_phys']) && $physScale > 0;
@@ -77,6 +81,7 @@ final class Matrix {
         // Пояснения под матрицей переносим по ширине заранее: от числа строк
         // зависит высота картинки (иначе текст уезжал за край SVG).
         $notes = ['Размер кружка — выраженность суммы когнитивного и эмоционального ответа.'];
+        $notes[] = 'Кружок разделён на секторы X (синий), Y (оранжевый), Z (зелёный): больший сектор — преобладающий параметр СМК; серый — фоновые показатели, в отчёте не разбираются.';
         $notes[] = 'Бледный пунктир — границы, по которым показатели делятся на низкие / средние / высокие ('
                  . Metrics::num(Metrics::LOW_PCT) . ' % и ' . Metrics::num(Metrics::HIGH_PCT) . ' % от максимума шкалы)'
                  . ($hasPhys ? ' и полоса медианы (±' . Metrics::num($midBand) . ').' : '.');
@@ -181,31 +186,51 @@ final class Matrix {
         $labels = [];   // занятые подписями прямоугольники
         foreach ($points as $p) {
             $a = $p['a'];
-            $color = self::color($a);
-            $isFlat = self::isPale($a);
-            $s[] = '<circle cx="' . round($p['x'], 1) . '" cy="' . round($p['y'], 1) . '" r="' . round($p['r'], 1) . '" fill="' . $color
-                 . '" fill-opacity="' . ($isFlat ? '0.45' : '0.72') . '" stroke="' . $color
-                 . '" stroke-width="' . (!empty($a['sig']) ? '2.2' : '1.2') . '"'
-                 . ($p['nodata'] ? ' stroke-dasharray="3 3"' : '') . '/>';
+            $isFlat = self::isPale($a);         // фон: в отчёте не разбирается (#7)
+            $cx = round($p['x'], 1); $cy = round($p['y'], 1); $r = round($p['r'], 1);
+            $sw = !empty($a['sig']) ? '2.2' : '1.2';
+            $dash = $p['nodata'] ? ' stroke-dasharray="3 3"' : '';
+            // Атрибуты для интерактивного слоя: математика всегда, интерпретация —
+            // если она сопоставлена (interactiveHtml её подставит).
+            $detail = self::esc(self::detailText($a));
+            $interpAttr = isset($interp[$a['label']]) && $interp[$a['label']] !== ''
+                ? ' data-interp="' . self::esc((string) $interp[$a['label']]) . '"' : '';
+            $s[] = '<g class="mx-bubble" data-n="' . (int) $a['n'] . '" data-label="' . self::esc((string) $a['label'])
+                 . '" data-detail="' . $detail . '"' . $interpAttr . '>';
+            $s[] = '<title>' . $detail . '</title>';
+            if ($isFlat || self::smkOrder((string) $a['smk']) === []) {
+                // Фон или нераспознанный СМК — сплошной кружок (серый / нейтральный).
+                $color = $isFlat ? self::C_FLAT : self::C_NONE;
+                $s[] = '<circle cx="' . $cx . '" cy="' . $cy . '" r="' . $r . '" fill="' . $color
+                     . '" fill-opacity="' . ($isFlat ? '0.5' : '0.72') . '" stroke="' . $color . '" stroke-width="' . $sw . '"' . $dash . '/>';
+            } else {
+                // Кружок разделён на секторы X / Y / Z: больший сектор — преобладающий
+                // параметр СМК (#5). Порядок и веса берём из столбца СМК.
+                foreach (self::sectorPaths($cx, $cy, (float) $r, (string) $a['smk']) as [$path, $col]) {
+                    $s[] = '<path d="' . $path . '" fill="' . $col . '" fill-opacity="0.82" stroke="#ffffff" stroke-width="0.6"/>';
+                }
+                $s[] = '<circle cx="' . $cx . '" cy="' . $cy . '" r="' . $r . '" fill="none" stroke="'
+                     . (!empty($a['sig']) ? '#2a3138' : '#ffffff') . '" stroke-width="' . $sw . '"' . $dash . '/>';
+            }
             // Номер шкалы: внутри кружка, если он достаточно велик, иначе рядом.
-            // Номер расшифрован в списке под матрицей, поэтому он есть всегда —
-            // даже когда название подписать некуда.
             if ($p['r'] >= 8.5) {
-                $s[] = '<text x="' . round($p['x'], 1) . '" y="' . round($p['y'] + 3.4, 1) . '" text-anchor="middle" font-size="9.5"'
-                     . ' font-weight="bold" fill="' . ($isFlat ? self::TEXT : '#ffffff') . '">' . (int) $a['n'] . '</text>';
+                $s[] = '<text x="' . $cx . '" y="' . round($p['y'] + 3.4, 1) . '" text-anchor="middle" font-size="9.5"'
+                     . ' font-weight="bold" fill="' . ($isFlat ? self::TEXT : '#ffffff') . '" pointer-events="none">' . (int) $a['n'] . '</text>';
             } else {
                 $s[] = '<text x="' . round($p['x'] - $p['r'] - 2, 1) . '" y="' . round($p['y'] - $p['r'] - 1, 1) . '" text-anchor="end"'
-                     . ' font-size="8" font-weight="bold" fill="' . $color . '">' . (int) $a['n'] . '</text>';
+                     . ' font-size="8" font-weight="bold" fill="' . self::color($a) . '" pointer-events="none">' . (int) $a['n'] . '</text>';
             }
-            // Название — сбоку, если для него есть свободное место: подпись не
-            // должна перекрывать ни другой кружок, ни другую подпись, ни край.
+            $s[] = '</g>';
+            // Название — сбоку, только для разбираемых показателей: фоновые (#7)
+            // подписываются лишь номером, подробности — при наведении.
+            if ($isFlat) continue;
             $text = self::flat((string) $a['short']);
             $box = self::labelBox($p, $text, $bubbles, $labels, $padL, $W - 4);
             if ($box === null) continue;
             [$tx, $ty, $anchor, $rect] = $box;
             $labels[] = $rect;
             $s[] = '<text x="' . round($tx, 1) . '" y="' . round($ty + 3.2, 1) . '" text-anchor="' . $anchor . '" font-size="9" fill="'
-                 . self::TEXT . '">' . self::esc($text) . '</text>';
+                 . self::TEXT . '" pointer-events="none">' . self::esc($text) . '</text>';
         }
 
         // Легенда: цвет = доминирующий параметр, размер = сумма ответов.
@@ -243,15 +268,178 @@ final class Matrix {
     }
 
     /**
-     * Бледный кружок — показатель, который в отчёте не разбирается: низкая
-     * выраженность и нет телесного отклика. Если физиология по шкале не
-     * распознана, судим только по когнитивной оси: низкий показатель всё равно
-     * фоновый, но «отсутствием отклика» это не называем.
+     * ─── Интерактивная матрица для страницы результата (#7, #9) ───────────────
+     *
+     * Тот же SVG, но обёрнутый в контейнер с JS-подсказкой: при наведении на
+     * кружок показываются и математика (уровень, «Знач.», зона), и — если
+     * интерпретация уже сделана — относящийся к этой шкале фрагмент текста.
+     * Фоновые показатели («не упоминается») на матрице серые и без подписи —
+     * подробности видны только при наведении. В PDF/письмо по-прежнему уходит
+     * статичный svg() (интерактивность там не нужна и невозможна).
+     *
+     * @param array  $metrics    Metrics::build()
+     * @param string $interpText текст последней интерпретации (или '')
+     * @param array  $opts       как у svg() (width, title)
+     */
+    public static function interactiveHtml(array $metrics, string $interpText = '', array $opts = []): string {
+        $snippets = self::interpSnippets($metrics, $interpText);
+        $svg = self::svg($metrics, $opts + ['interp' => $snippets]);
+        if ($svg === '') return '';
+        $hasInterp = $interpText !== '';
+        $wid = 'mx' . substr(bin2hex(random_bytes(4)), 0, 8);
+        ob_start(); ?>
+<div class="mx-wrap" id="<?= $wid ?>"><?= $svg ?>
+  <div class="mx-tip" hidden><div class="mx-tip-title"></div><div class="mx-tip-math"></div><div class="mx-tip-interp"></div></div>
+</div>
+<style>
+  .mx-wrap{position:relative}
+  .mx-wrap .mx-bubble{cursor:pointer}
+  .mx-wrap .mx-bubble:hover{filter:brightness(1.06)}
+  .mx-tip{position:absolute;z-index:20;max-width:320px;background:#2a3138;color:#fff;padding:9px 11px;border-radius:7px;
+          font-size:12px;line-height:1.45;box-shadow:0 6px 20px rgba(0,0,0,.25);pointer-events:none}
+  .mx-tip-title{font-weight:bold;margin-bottom:3px}
+  .mx-tip-math{color:#d6dde3}
+  .mx-tip-interp{margin-top:6px;padding-top:6px;border-top:1px solid #4a545d;color:#fff}
+  .mx-tip-interp:empty{display:none;border:0;margin:0;padding:0}
+</style>
+<p class="muted"><?= $hasInterp
+    ? 'Наведите на кружок — покажутся расчёт и относящийся к шкале фрагмент интерпретации.'
+    : 'Наведите на кружок — покажется расчёт. После интерпретации здесь появится и её текст по каждой шкале.' ?></p>
+<script>
+(function(){
+  var wrap=document.getElementById('<?= $wid ?>');
+  if(!wrap) return;
+  var tip=wrap.querySelector('.mx-tip'),
+      tt=tip.querySelector('.mx-tip-title'),
+      tm=tip.querySelector('.mx-tip-math'),
+      ti=tip.querySelector('.mx-tip-interp');
+  wrap.querySelectorAll('.mx-bubble').forEach(function(g){
+    g.addEventListener('mouseenter', function(){
+      tt.textContent = (g.dataset.n?g.dataset.n+'. ':'') + (g.dataset.label||'');
+      tm.textContent = g.dataset.detail||'';
+      ti.textContent = g.dataset.interp||'';
+      tip.hidden=false;
+    });
+    g.addEventListener('mousemove', function(e){
+      var b=wrap.getBoundingClientRect();
+      var x=e.clientX-b.left+14, y=e.clientY-b.top+14;
+      if(x+tip.offsetWidth>b.width) x=b.width-tip.offsetWidth-4;
+      if(y+tip.offsetHeight>b.height) y=e.clientY-b.top-tip.offsetHeight-10;
+      tip.style.left=Math.max(0,x)+'px'; tip.style.top=Math.max(0,y)+'px';
+    });
+    g.addEventListener('mouseleave', function(){ tip.hidden=true; });
+  });
+})();
+</script>
+<?php
+        return ob_get_clean();
+    }
+
+    /**
+     * Фрагмент интерпретации по каждой шкале: первый абзац текста, где встречается
+     * название шкалы (или его короткая форма). Это честное сопоставление без
+     * додумывания — если модель шкалу не упомянула, фрагмента нет.
+     *
+     * @return array<string,string> label => фрагмент
+     */
+    private static function interpSnippets(array $metrics, string $interpText): array {
+        $out = [];
+        if (trim($interpText) === '') return $out;
+        // Абзацы: по пустой строке. Заголовки Markdown убираем из начала абзаца.
+        $paras = preg_split('/\n\s*\n/u', str_replace("\r\n", "\n", $interpText)) ?: [];
+        $paras = array_values(array_filter(array_map('trim', $paras), static fn ($p) => $p !== ''));
+        foreach ($metrics['axes'] ?? [] as $a) {
+            $needles = array_unique(array_filter([
+                (string) ($a['label'] ?? ''),
+                trim(str_replace("\n", ' ', (string) ($a['short'] ?? ''))),
+            ]));
+            foreach ($paras as $para) {
+                $hit = false;
+                foreach ($needles as $nd) {
+                    if ($nd !== '' && mb_stripos($para, $nd) !== false) { $hit = true; break; }
+                }
+                if (!$hit) continue;
+                $clean = trim((string) preg_replace('/^#{1,6}\s*/u', '', $para));
+                $clean = trim((string) preg_replace('/[*_`#]+/u', '', $clean));
+                if (mb_strlen($clean) > 400) $clean = mb_substr($clean, 0, 397) . '…';
+                $out[(string) $a['label']] = $clean;
+                break;
+            }
+        }
+        return $out;
+    }
+
+    /** Плоское описание математики шкалы — для <title> и подсказки. */
+    private static function detailText(array $a): string {
+        $parts = [];
+        $parts[] = 'Ответ теста: ' . Metrics::num((float) $a['score']) . ' из ' . (int) $a['scale_max']
+                 . ' (' . Metrics::num((float) $a['pct']) . ' %, ' . $a['level_label'] . ')';
+        if ($a['zna'] !== null) {
+            $parts[] = 'Знач.: ' . Metrics::num((float) $a['zna']) . ' — ' . $a['phys_label'];
+        } else {
+            $parts[] = 'Физиология не распознана';
+        }
+        if (!empty($a['smk'])) $parts[] = 'СМК: ' . $a['smk'];
+        $zone = Metrics::MATRIX_ZONES[$a['matrix_zone']] ?? '';
+        if ($zone !== '') $parts[] = 'Зона: ' . $zone;
+        $cat = (string) ($a['category_title'] ?? '');
+        $parts[] = 'Раздел: ' . ($cat !== '' ? $cat : 'не упоминается в отчёте');
+        return implode('. ', $parts) . '.';
+    }
+
+    /**
+     * Порядок параметров СМК: «Z*>X>Y» → ['Z','X','Y']. Недостающие до трёх
+     * буквы дописываются в конец (наименьший вес). Пустой токен → [].
+     */
+    private static function smkOrder(string $smk): array {
+        $norm = str_replace(['Х', 'х', 'У', 'у', 'Ζ', 'x', 'y', 'z'], ['X', 'X', 'Y', 'Y', 'Z', 'X', 'Y', 'Z'], $smk);
+        $order = [];
+        foreach (preg_split('//u', $norm, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $ch) {
+            if (in_array($ch, ['X', 'Y', 'Z'], true) && !in_array($ch, $order, true)) $order[] = $ch;
+        }
+        if ($order === []) return [];
+        foreach (['X', 'Y', 'Z'] as $ch) if (!in_array($ch, $order, true)) $order[] = $ch;
+        return $order;
+    }
+
+    /**
+     * Секторы кружка по порядку СМК: первый параметр — самый большой сектор.
+     * Веса по рангу (0.5 / 0.33 / 0.17) наглядно показывают преобладание, при
+     * этом кружок честно разделён на X/Y/Z. Возвращает пары [path, color].
+     *
+     * @return array<int, array{0:string,1:string}>
+     */
+    private static function sectorPaths(float $cx, float $cy, float $r, string $smk): array {
+        $order = self::smkOrder($smk);
+        if ($order === []) return [];
+        $weights = [0.5, 0.33, 0.17];
+        $colors = ['X' => self::C_X, 'Y' => self::C_Y, 'Z' => self::C_Z];
+        $out = [];
+        $a0 = -M_PI / 2;            // старт сверху
+        foreach ($order as $k => $letter) {
+            $frac = $weights[$k] ?? 0.0;
+            if ($frac <= 0) continue;
+            $a1 = $a0 + 2 * M_PI * $frac;
+            $x0 = $cx + $r * cos($a0); $y0 = $cy + $r * sin($a0);
+            $x1 = $cx + $r * cos($a1); $y1 = $cy + $r * sin($a1);
+            $large = ($a1 - $a0) > M_PI ? 1 : 0;
+            $path = 'M ' . round($cx, 1) . ' ' . round($cy, 1)
+                  . ' L ' . round($x0, 1) . ' ' . round($y0, 1)
+                  . ' A ' . round($r, 1) . ' ' . round($r, 1) . ' 0 ' . $large . ' 1 ' . round($x1, 1) . ' ' . round($y1, 1) . ' Z';
+            $out[] = [$path, $colors[$letter] ?? self::C_NONE];
+            $a0 = $a1;
+        }
+        return $out;
+    }
+
+    /**
+     * Бледный (серый) кружок — показатель, который в отчёте НЕ упоминается: ровно
+     * та же категория «skip», что и в тексте интерпретации (Interpret и Metrics).
+     * Так серые кружки на матрице совпадают со шкалами, о которых отчёт молчит
+     * (требование заказчика: «не упоминается» → серый, подробности по наведению).
      */
     private static function isPale(array $axis): bool {
-        $zone = (string) ($axis['matrix_zone'] ?? '');
-        if ($zone === 'flat') return true;
-        return $zone === 'unknown' && ($axis['level'] ?? '') === 'low';
+        return (string) ($axis['category'] ?? '') === 'skip';
     }
 
     /** Цвет кружка: бледно-серый для фоновых, иначе — по доминирующему параметру. */

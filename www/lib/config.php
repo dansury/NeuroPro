@@ -81,7 +81,7 @@ if (!function_exists('cfg_settings_whitelist')) {
             'LLM_PROVIDER', 'LLM_DEFAULT_MODEL', 'LLM_PROVIDER_PRIORITY',
             'LLM_FALLBACK_MODELS',
             'OPENROUTER_API_KEY', 'LLM_VISION_MODEL', 'LLM_FALLBACK_MODEL',
-            'LLM_OCR_MODELS', 'YANDEX_FALLBACK_MODEL',
+            'LLM_OCR_MODELS', 'SCREENSHOT_MODEL', 'YANDEX_FALLBACK_MODEL',
             'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'YANDEX_LLM_URL',
             'YANDEX_OCR_URL', 'YANDEX_OCR_MODEL', 'YANDEX_OCR_ENABLED',
             'ADMIN_EMAIL', 'ERROR_EMAIL',
@@ -119,6 +119,10 @@ $config = [
         'LLM_OCR_MODELS',
         'google/gemini-2.5-flash,google/gemini-2.0-flash-001'
     ))))),
+    // ОТДЕЛЬНАЯ мультимодальная модель для распознавания скриншота «значимости»
+    // (LLM::recognizeSignificance). Смотрит на графики, а не на голый OCR-текст.
+    // Только OpenRouter (у Яндекса нет vision-чата). Пусто → используются LLM_OCR_MODELS.
+    'SCREENSHOT_MODEL'      => cfg_env('SCREENSHOT_MODEL', 'google/gemini-2.5-flash'),
 
     /* ── Yandex Cloud Foundation Models (OpenAI-compatible mode) ── */
     'YANDEX_API_KEY'        => cfg_env('YANDEX_API_KEY', ''),
