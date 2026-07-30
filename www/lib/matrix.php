@@ -480,6 +480,9 @@ final class Matrix {
       RMIN=+D.rmin, RMAX=+D.rmax, GAP=+D.gap, WMIN=+D.wmin, WMAX=+D.wmax,
       C_FLAT='<?= self::C_FLAT ?>', C_TEXT='<?= self::TEXT ?>', C_ALERT='<?= self::C_ALERT ?>',
       MID_BAND_MIN=<?= Metrics::MID_BAND_MIN ?>,
+      // Зеркало Metrics::categoryFor(): у методик со слиянием категорий
+      // (Басса-Дарки) низкий показатель у самой медианы — тоже непроявленный.
+      MERGE_MID=<?= in_array('variable', Metrics::CATEGORY_MERGE_BY_TEST[(string) ($metrics['test_key'] ?? '')] ?? [], true) ? 'true' : 'false' ?>,
       saveUrl=<?= json_encode($saveUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
   var st={low:+D.low, high:+D.high, band:+D.bandPct, power:+D.contrast};
   var ctl=document.getElementById('<?= $wid ?>-ctl');
@@ -507,6 +510,7 @@ final class Matrix {
   }
   function isSkip(lvl, ps){
     if(ps===null) return lvl==='low';
+    if(ps==='median') return MERGE_MID && lvl==='low';
     return ps==='below' && lvl==='low';
   }
   function radius(w){

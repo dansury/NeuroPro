@@ -85,6 +85,7 @@ final class Interpret {
      */
     public static function buildStyleMessage(array $profile, ?array $phys, string $draft): string {
         $m = Metrics::build($profile, $phys);
+        $listsSkipped = Metrics::listsSkipped((string) ($m['test_key'] ?? ''));
         $lines = [];
         $lines[] = 'ФАКТЫ, КОТОРЫЕ ОБЯЗАНЫ СОХРАНИТЬСЯ (проверь по ним итог; в текст их не переписывай):';
         foreach ($m['axes'] as $a) {
@@ -93,7 +94,16 @@ final class Interpret {
                 $a['zna'] === null ? 'о телесной реакции не пишем — физиология не распознана' : $a['phys_label']);
         }
         $skipped = array_map(static fn ($i) => $m['axes'][$i]['label'], $m['groups']['skip'] ?? []);
-        if ($skipped) $lines[] = '- НЕ ДОЛЖНЫ ПОЯВИТЬСЯ В ТЕКСТЕ: ' . implode(', ', $skipped) . '.';
+        if ($skipped) {
+            // У методик со списком непроявленных шкал (Басса-Дарки) этот список —
+            // часть отчёта: редактор второго слоя не имеет права его вычистить,
+            // но и разбирать перечисленное не должен.
+            $lines[] = $listsSkipped
+                ? '- ОСТАЮТСЯ ПРОСТЫМ СПИСКОМ, БЕЗ РАЗБОРА (раздел «'
+                    . Metrics::categoryTitle('skip', (string) ($m['test_key'] ?? '')) . '»): '
+                    . implode(', ', $skipped) . '.'
+                : '- НЕ ДОЛЖНЫ ПОЯВИТЬСЯ В ТЕКСТЕ: ' . implode(', ', $skipped) . '.';
+        }
         $lines[] = '';
         $lines[] = 'ОТЧЁТ ДЛЯ ПРАВКИ:';
         $lines[] = $draft;
@@ -133,12 +143,31 @@ final class Interpret {
         $lines[] = 'Дата: ' . $profile['date'];
         $lines[] = '';
 
+        $testKey = (string) ($m['test_key'] ?? '');
+        $listsSkipped = Metrics::listsSkipped($testKey);
+
+        // Что измеряет каждая шкала — канонические формулировки методики
+        // (Metrics::SCALE_MEANING). Без них модель пересказывала определения
+        // своими словами и меняла смысл шкалы (Конституция, принцип II).
+        $meanings = [];
+        foreach ($m['axes'] as $a) {
+            if (($a['meaning'] ?? '') !== '') $meanings[] = sprintf('- %s — %s.', $a['label'], $a['meaning']);
+        }
+        if ($meanings) {
+            $lines[] = 'ЧТО ИЗМЕРЯЕТ КАЖДАЯ ШКАЛА (канонические описания методики; своих определений не придумывай, '
+                     . 'пересказывай эти — своими словами, но не меняя смысла):';
+            foreach ($meanings as $line) $lines[] = $line;
+            $lines[] = '';
+        }
+
         $lines[] = 'РАСЧЁТ ПО ШКАЛАМ (посчитан сервисом; НЕ пересчитывай, НЕ переклассифицируй):';
         foreach ($m['axes'] as $a) {
             $lines[] = sprintf('%d. %s — %s', $a['n'], $a['label'], $a['fact']);
             $extra = [];
             if ($a['category'] === 'skip') {
-                $extra[] = 'РАЗДЕЛ: не упоминать в отчёте';
+                $extra[] = $listsSkipped
+                    ? 'РАЗДЕЛ: ' . $a['category_title'] . ' (только в общем списке, без разбора)'
+                    : 'РАЗДЕЛ: не упоминать в отчёте';
             } else {
                 $extra[] = 'РАЗДЕЛ: ' . $a['category_title'];
             }
@@ -172,11 +201,14 @@ final class Interpret {
 
         $lines[] = self::matrixBlock($m);
 
-        $testKey = (string) ($m['test_key'] ?? '');
-        $lines[] = 'РАЗДЕЛЫ ОТЧЁТА И ИХ СОСТАВ (иных шкал в разделе быть не может, шкала — ровно в одном разделе):';
+        $lines[] = 'РАЗДЕЛЫ ОТЧЁТА И ИХ СОСТАВ (иных шкал в разделе быть не может, шкала — ровно в одном разделе; '
+                 . 'порядок разделов ниже — порядок разделов в отчёте):';
         $anySection = false;
         foreach ($m['groups'] as $cat => $idxs) {
-            if (!$idxs || $cat === 'skip') continue;
+            // Раздел непроявленных шкал печатается списком только там, где этого
+            // требует методика (Басса-Дарки); у остальных тестов такие шкалы из
+            // отчёта по-прежнему выпадают целиком.
+            if (!$idxs || ($cat === 'skip' && !$listsSkipped)) continue;
             $anySection = true;
             $names = array_map(static fn ($i) => $m['axes'][$i]['label'], $idxs);
             $lines[] = sprintf('- %s: %s', Metrics::categoryTitle($cat, $testKey), implode(', ', $names));
@@ -184,7 +216,7 @@ final class Interpret {
         }
         if (!$anySection) $lines[] = '- ни одна шкала не попала в разделы: напиши только общее спокойное резюме.';
         $skipped = array_map(static fn ($i) => $m['axes'][$i]['label'], $m['groups']['skip'] ?? []);
-        if ($skipped) $lines[] = '- НЕ УПОМИНАТЬ ВООБЩЕ: ' . implode(', ', $skipped);
+        if ($skipped && !$listsSkipped) $lines[] = '- НЕ УПОМИНАТЬ ВООБЩЕ: ' . implode(', ', $skipped);
         $lines[] = '';
 
         $lines[] = 'Сформируй интерпретацию строго по инструкции из системного промпта. '
@@ -218,7 +250,7 @@ final class Interpret {
         $lines[] = '- жирная обводка кружка и жирная подпись — достоверное отклонение (p<0.05).';
         $lines[] = 'ЧТО ЗНАЧАТ ПАРАМЕТРЫ СМК (соотношение X/Y/Z есть у шкалы независимо от достоверности и от того, '
                  . 'выше или ниже медианы «Знач.»; оно говорит, КАКОЙ канал в реакции ведущий, но НЕ говорит, сильна ли реакция):';
-        foreach (Metrics::SMK_MEANING as $letter => $meaning) {
+        foreach (Metrics::smkMeanings((string) ($m['test_key'] ?? '')) as $letter => $meaning) {
             $lines[] = '  · ' . $letter . ' — ' . $meaning . '.';
         }
         $byZone = [];
@@ -229,8 +261,10 @@ final class Interpret {
             $lines[] = '  · ' . $label . ': ' . implode(', ', $byZone[$zone]) . '.';
         }
         $lines[] = 'Ссылаться на матрицу можно («на матрице под диаграммой …»), но выдумывать положение кружков нельзя: '
-                 . 'бери его из списка зон выше. Шкалы из списка «НЕ УПОМИНАТЬ ВООБЩЕ» на матрице видны, но в тексте '
-                 . 'о них всё равно не пиши.';
+                 . 'бери его из списка зон выше.'
+                 . (Metrics::listsSkipped((string) ($m['test_key'] ?? ''))
+                     ? ' Бледно-серые кружки — те шкалы, что идут в отчёте одним списком без разбора.'
+                     : ' Шкалы из списка «НЕ УПОМИНАТЬ ВООБЩЕ» на матрице видны, но в тексте о них всё равно не пиши.');
         $lines[] = '';
         return implode("\n", $lines);
     }

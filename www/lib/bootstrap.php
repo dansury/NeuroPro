@@ -44,12 +44,13 @@ const NP_PROMPT_V3_COMMENT = 'v3: вся математика в коде (Metri
 const NP_PROMPT_V4_COMMENT = 'v4: расчёт, итоги методики и матрица показателей приходят готовыми; в отчёте клиента таблиц нет';
 const NP_PROMPT_V5_COMMENT = 'v5: глубина отчёта у недорогих моделей — скелет разбора шкалы, объём, СМК всегда, конкретные рекомендации';
 const NP_PROMPT_V6_COMMENT = 'v6: содержательность вместо многословности — запрет повторов, разделы по методике, язык правит второй слой';
+const NP_PROMPT_V7_COMMENT = 'v7 (Басса-Дарки): описания видов агрессии и четыре группы по матрице — непроявленные перечисляются списком';
 const NP_PROMPT_STYLE_COMMENT = 'Второй слой: литературная правка готового отчёта (язык, краткость; факты не трогает)';
 
 /** Комментарии всех автосидируемых версий — по ним отличаем служебные от ручных. */
 function np_seeded_comments(): array {
     return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
-            NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_STYLE_COMMENT];
+            NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_STYLE_COMMENT];
 }
 
 /** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
@@ -102,6 +103,7 @@ function np_seed_prompts(array $cfg = []): void {
     np_seed_prompts_v4($model, $provider);
     np_seed_prompts_v5($model, $provider);
     np_seed_prompts_v6($model, $provider);
+    np_seed_prompts_v7($model, $provider);
     np_seed_style_prompt($model, $provider);
     np_heal_seeded_models($model, $provider);
 }
@@ -119,6 +121,25 @@ function np_seed_prompts_v6(string $model = 'yandexgpt', string $provider = 'yan
         ['smu' => 'smu_v6.php', 'lsi' => 'lsi_v6.php', 'bd' => 'bd_v6.php'],
         NP_PROMPT_V6_COMMENT,
         [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT, NP_PROMPT_V5_COMMENT],
+        $model, $provider
+    );
+}
+
+/**
+ * Досидирует версию v7 — ТОЛЬКО для Басса-Дарки. Заказчик просил, чтобы отчёт
+ * называл каждый вид агрессии своим описанием и раскладывал все восемь шкал на
+ * четыре группы по положению на матрице (проявленные; проявленные без телесного
+ * напряжения; скрытое напряжение; не проявляются — списком). Сами группы и
+ * описания считает код (Metrics::CATEGORY_BY_TEST['bd'], SCALE_MEANING), промпт
+ * лишь задаёт, как об этом писать. У СМУ и ИЖС поколения v7 нет — их активной
+ * версией остаётся v6.
+ */
+function np_seed_prompts_v7(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    np_seed_prompt_generation(
+        ['bd' => 'bd_v7.php'],
+        NP_PROMPT_V7_COMMENT,
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
+         NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT],
         $model, $provider
     );
 }
