@@ -11,6 +11,7 @@
 
 require_once __DIR__ . '/chart.php';
 require_once __DIR__ . '/profile.php';
+require_once __DIR__ . '/metrics.php';
 
 final class Report {
     /**
@@ -24,15 +25,14 @@ final class Report {
         $phone = $cfg['BRAND_PHONE'] ?? '';
         $logo  = self::logoDataUri($cfg['BRAND_LOGO'] ?? '');
 
-        $labels = array_map(static fn ($s) => Profile::shortLabel($s['label']), $profile['scores']);
-        $cog    = array_map(static fn ($s) => (float) $s['score'], $profile['scores']);
         $phys   = $opts['phys'] ?? null;
         // Обратная совместимость: старые вызовы передавали голый aligned-массив.
         if ($phys !== null && array_is_list($phys)) $phys = ['aligned' => $phys, 'p' => [], 'sig' => []];
-        $svg    = Chart::svg($labels, $cog, (int) ($profile['score_max'] ?? 10), $phys['aligned'] ?? null, [
+        // Все числа отчёта — из одного детерминированного расчёта.
+        $metrics = Metrics::build($profile, $phys);
+        $svg = Chart::fromMetrics($metrics, [
             'title' => Profile::chartTitle((string) ($profile['test_key'] ?? '')),
             'size'  => 600,
-            'phys_sig' => $phys['sig'] ?? [],
         ]);
 
         $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
@@ -55,10 +55,12 @@ final class Report {
   .meta { margin: 14px 0 4px; }
   .chart { text-align: center; margin: 8px 0; }
   .chart svg { max-width: 100%; height: auto; }
-  table.scores { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 11.5px; }
-  table.scores th, table.scores td { border: 1px solid #c9d2da; padding: 4px 8px; text-align: left; }
+  table.scores { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 11px; table-layout: auto; }
+  table.scores th, table.scores td { border: 1px solid #c9d2da; padding: 4px 6px; text-align: left; }
   table.scores th { background: #f4f6f8; }
-  table.scores td.num { text-align: center; width: 56px; }
+  table.scores td.num { text-align: center; white-space: nowrap; }
+  table.scores .dim { color: #8a949d; font-size: 10.5px; }
+  .legend { color: #6b7682; font-size: 10.5px; margin: -4px 0 10px; }
   .group { writing-mode: vertical-rl; transform: rotate(180deg); text-align: center; font-weight: bold; color: #6b7682; }
   .totals { margin: 8px 0 18px; }
   .interp { margin-top: 8px; }
@@ -84,9 +86,9 @@ final class Report {
 
   <div class="chart"><?= $svg ?></div>
 
-  <?= self::scoresTable($profile, $h) ?>
+  <?= self::dataTable($metrics, $profile, $h) ?>
 
-  <?= self::physTable($profile, $phys, $h) ?>
+  <?= self::totals($metrics, $profile, $h) ?>
 
   <div class="interp"><?= $interpHtml ?></div>
 
@@ -99,74 +101,78 @@ final class Report {
         return ob_get_clean();
     }
 
-    private static function scoresTable(array $profile, callable $h): string {
-        $scores = $profile['scores'];
-        if (!$scores) return '';
+    /**
+     * ЕДИНСТВЕННАЯ таблица данных отчёта: балл, уровень, положение в профиле,
+     * «Знач.», достоверность и вывод — всё из Metrics.
+     *
+     * Раньше таблиц было две (баллы + физиология), а нейросеть печатала в тексте
+     * третью, свою — и они противоречили друг другу: у одной и той же шкалы
+     * достоверность была «—» в таблице сервиса и «p<0.05» в таблице модели.
+     * Теперь таблица одна, и её строит только код.
+     */
+    private static function dataTable(array $metrics, array $profile, callable $h): string {
+        $axes = $metrics['axes'];
+        if (!$axes) return '';
         $testKey = (string) ($profile['test_key'] ?? '');
-        $isSmu = $testKey === 'smu' && count($scores) === 12;
-        $unit = $testKey === 'lsi' ? '%' : 'Баллы';
+        $isSmu = $testKey === 'smu' && count($axes) === 12;
+        $hasPhys = !empty($metrics['has_phys']);
 
         ob_start(); ?>
 <table class="scores">
-  <tr><th>#</th><th>Параметр</th><th><?= $h($unit) ?></th><?php if ($isSmu): ?><th></th><?php endif; ?></tr>
-  <?php foreach ($scores as $i => $s):
+  <tr>
+    <th>Параметр</th><th>Балл</th><th>Уровень</th>
+    <?php if ($hasPhys): ?><th>Знач.</th><th>Физиология</th><th>Вывод</th><?php endif; ?>
+    <?php if ($isSmu): ?><th></th><?php endif; ?>
+  </tr>
+  <?php foreach ($axes as $i => $a):
       $rowspanCell = '';
       if ($isSmu && $i === 0) $rowspanCell = '<td class="group" rowspan="6">Мотивация достижения</td>';
       if ($isSmu && $i === 6) $rowspanCell = '<td class="group" rowspan="6">Мотивация отношения</td>';
+      $style = $a['sig'] ? ' style="font-weight:bold"' : '';
   ?>
   <tr>
-    <td class="num"><?= $h($s['n']) ?></td>
-    <td><?= $h($s['label']) ?></td>
-    <td class="num"><?= $h(rtrim(rtrim(number_format((float) $s['score'], 1, '.', ''), '0'), '.')) ?></td>
+    <td<?= $style ?>><?= $h($a['label']) ?></td>
+    <td class="num"><?= $h(self::num($a['score'])) ?> из <?= (int) $a['scale_max'] ?>
+      <span class="dim"><?= $h(self::num($a['pct'])) ?>%</span></td>
+    <td><?= $h($a['level_label']) ?><br><span class="dim"><?= $h($a['rank_label']) ?></span></td>
+    <?php if ($hasPhys): ?>
+      <td class="num"<?= $style ?>><?= $a['zna'] === null ? '—' : $h(self::num((float) $a['zna'])) ?>
+        <br><span class="dim"><?= $h($a['p_label']) ?></span></td>
+      <td><?= $h($a['phys_dir']) ?></td>
+      <td><?= $h($a['category_short']) ?></td>
+    <?php endif; ?>
     <?= $rowspanCell ?>
   </tr>
   <?php endforeach; ?>
 </table>
-<?php if ($isSmu):
-    $ach = array_sum(array_map(fn ($s) => (float) $s['score'], array_slice($scores, 0, 6)));
-    $rel = array_sum(array_map(fn ($s) => (float) $s['score'], array_slice($scores, 6, 6))); ?>
-<div class="totals">
-  Заключение:<br>
-  Мотивация достижения: <?= $h((string) round($ach)) ?>.<br>
-  Мотивация отношения: <?= $h((string) round($rel)) ?>.
-</div>
-<?php endif; ?>
-<?php if ($testKey === 'bd' && ($indices = Profile::bdIndices($scores))): ?>
-<div class="totals">
-  Заключение:<br>
-  <?php foreach ($indices as $name => $ix): ?>
-  <?= $h($name) ?> = <?= $h(self::num($ix['value'])) ?> из <?= (int) $ix['cap'] ?> (норма <?= $h(self::num($ix['min'])) ?>–<?= $h(self::num($ix['max'])) ?>) — <?= $h($ix['verdict']) ?>.<br>
-  <?php endforeach; ?>
-</div>
+<?php if ($hasPhys): ?>
+<p class="legend">«Знач.» — столбец смысло-эмоциональной значимости Эгоскопа: 0 — медиана,
+  больше нуля — тело откликается сильнее обычного, меньше нуля — телесного отклика нет.
+  Жирным выделены достоверные отклонения (p&lt;0.05).</p>
 <?php endif;
         return ob_get_clean();
     }
 
-    /**
-     * Таблица физиологии («Знач.» со скриншота значимости). Строки с p<0.05 —
-     * жирные; оси без данных — прочерк (ничего не выдумываем).
-     */
-    private static function physTable(array $profile, ?array $phys, callable $h): string {
-        if ($phys === null) return '';
-        $aligned = $phys['aligned'] ?? [];
-        $hasAny = false;
-        foreach ($aligned as $v) { if ($v !== null) { $hasAny = true; break; } }
-        if (!$hasAny) return '';
+    /** Итоги методики: суммы СМУ и индексы Басса-Дарки (детерминированные). */
+    private static function totals(array $metrics, array $profile, callable $h): string {
+        $scores = $profile['scores'] ?? [];
+        $testKey = (string) ($profile['test_key'] ?? '');
+        $isSmu = $testKey === 'smu' && count($scores) === 12;
+        $indices = $metrics['indices'] ?? [];
+        if (!$isSmu && !$indices) return '';
         ob_start(); ?>
-<table class="scores">
-  <tr><th>Смысло-эмоциональная значимость</th><th>Знач.</th><th>Достоверность</th></tr>
-  <?php foreach ($profile['scores'] as $i => $s):
-      $v = $aligned[$i] ?? null;
-      $p = $phys['p'][$i] ?? null;
-      $sig = !empty($phys['sig'][$i]);
-      $style = $sig ? ' style="font-weight:bold"' : ''; ?>
-  <tr>
-    <td<?= $style ?>><?= $h($s['label']) ?></td>
-    <td class="num"<?= $style ?>><?= $v === null ? '—' : $h(self::num((float) $v)) ?></td>
-    <td class="num"<?= $style ?>><?= $p === null ? ($sig ? 'p&lt;0.05' : '—') : ($p < 0.05 ? 'p&lt;0.05' : 'p&gt;0.05') ?></td>
-  </tr>
+<div class="totals">
+  Заключение:<br>
+  <?php if ($isSmu):
+      $ach = array_sum(array_map(fn ($s) => (float) $s['score'], array_slice($scores, 0, 6)));
+      $rel = array_sum(array_map(fn ($s) => (float) $s['score'], array_slice($scores, 6, 6))); ?>
+    Мотивация достижения: <?= $h((string) round($ach)) ?>.<br>
+    Мотивация отношения: <?= $h((string) round($rel)) ?>.<br>
+  <?php endif; ?>
+  <?php foreach ($indices as $name => $ix): ?>
+    <?= $h($name) ?> = <?= $h(self::num($ix['value'])) ?> из <?= (int) $ix['cap'] ?> (норма <?= $h(self::num($ix['min'])) ?>–<?= $h(self::num($ix['max'])) ?>) — <?= $h($ix['verdict']) ?>.<br>
   <?php endforeach; ?>
-</table>
+</div>
 <?php
         return ob_get_clean();
     }
@@ -182,6 +188,32 @@ final class Report {
         if ($data === false) return '';
         $mime = str_ends_with(strtolower($path), '.png') ? 'image/png' : 'image/jpeg';
         return 'data:' . $mime . ';base64,' . base64_encode($data);
+    }
+
+    /**
+     * Текст интерпретации → HTML для отчёта. В отличие от mdToHtml вырезает
+     * таблицы: единственная таблица данных в отчёте — каноническая, из Metrics.
+     * Таблица от нейросети — это те же числа, пересказанные второй раз, и она
+     * расходилась с расчётом (у Обиды достоверность «—» против «p<0.05»).
+     * Применяется и к старым интерпретациям, сделанным до промптов v3.
+     */
+    public static function interpToHtml(string $md): string {
+        return self::mdToHtml(self::stripTables($md));
+    }
+
+    /** Убирает Markdown-таблицы (и их заголовок, если он остался пустым). */
+    public static function stripTables(string $md): string {
+        $lines = preg_split('/\r?\n/', $md);
+        $out = [];
+        foreach ($lines as $line) {
+            if (preg_match('/^\s*\|.*\|\s*$/', rtrim($line))) continue;
+            $out[] = $line;
+        }
+        $text = implode("\n", $out);
+        // Заголовок вида «## Данные теста и физиологии», под которым остался
+        // только пробел, — вырезаем вместе с ним: таблицу заменяет каноническая.
+        $text = (string) preg_replace('/^#{1,3}\s*[^\n]*(?:табли|Данные теста|Данные физиолог)[^\n]*\n(?=\s*(?:#|$))/miu', '', $text);
+        return (string) preg_replace('/\n{3,}/', "\n\n", $text);
     }
 
     /** Minimal Markdown → HTML for interpretation text (headings, bold, tables, lists). */
