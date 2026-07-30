@@ -231,6 +231,9 @@ function view_result(array $cfg, callable $h): void {
     // может переделать отчёт на другой нейросети (#3).
     $models = LLM::modelsByGroup($cfg);
     $defaultModel = (string)($active['model_id'] ?? ($famVersions[0]['model_id'] ?? ''));
+    // Пока интерпретаций нет, правой колонке нечего показывать — страница
+    // остаётся обычной лентой во всю ширину.
+    $split = $interps !== [];
     ob_start(); ?>
     <h1><?= $h($prof['name']) ?> <span class="muted">— <?= $h($prof['methodic']) ?></span></h1>
     <?php if ($phys !== null && $phys['error'] !== null): ?>
@@ -240,6 +243,8 @@ function view_result(array $cfg, callable $h): void {
       <div class="msg warn">Физиология не распознана: OCR не нашёл ни одного значения «Знач.» по осям.
       Проверьте скриншот или введите значения вручную в таблице ниже.</div>
     <?php endif; ?>
+    <div class="split<?= $split ? ' on' : '' ?>">
+    <div class="split-col">
     <div class="chart card"><?= $svg ?></div>
     <?php if ($matrix !== ''): ?>
       <div class="card">
@@ -325,6 +330,8 @@ function view_result(array $cfg, callable $h): void {
       })();
       </script>
     <?php endif; ?>
+    </div><!-- /split-col: графики -->
+    <div class="split-col">
     <?php foreach ($interps as $it): ?>
       <div class="card">
         <div class="row"><h2>Интерпретация (промпт v<?= $h($it['version_no']) ?>, <?= $h($it['model_id']) ?>) <span class="muted"><?= $h($it['created_at']) ?></span>
@@ -340,6 +347,8 @@ function view_result(array $cfg, callable $h): void {
         <div class="interp editable" data-interp="<?= (int)$it['id'] ?>"><?= Report::interpToEditableHtml($it['content']) ?></div>
       </div>
     <?php endforeach; ?>
+    </div><!-- /split-col: интерпретации -->
+    </div><!-- /split -->
     <script>
     /* Правка отчёта до выгрузки в PDF: двойной клик открывает абзац как текст
        Markdown (ровно то, что лежит в базе), сохранение перерисовывает весь
@@ -409,7 +418,7 @@ function view_result(array $cfg, callable $h): void {
     })();
     </script>
     <?php
-    layout('Результат', ob_get_clean(), $h);
+    layout('Результат', ob_get_clean(), $h, ['wide' => $split]);
 }
 
 function view_report(array $cfg): void {
@@ -943,7 +952,12 @@ function service_warnings(array $cfg): array {
 
 function redirect(string $to): void { header('Location: ' . $to); exit; }
 
-function layout(string $title, string $body, callable $h): void {
+/**
+ * Каркас страницы. $opts['wide'] расширяет колонку контента: это нужно только
+ * странице результата в двухколоночном режиме (графики слева, интерпретация
+ * справа) — на 1000 px такой режим смысла не имеет.
+ */
+function layout(string $title, string $body, callable $h, array $opts = []): void {
     $err = $_GET['err'] ?? '';
     $ok = $_GET['ok'] ?? '';
     // Баннеры о ненастроенных сервисах. try: layout зовётся и со страницы
@@ -995,6 +1009,21 @@ function layout(string $title, string $body, callable $h): void {
   tr.sig td{font-weight:bold}
   input.num{width:80px;text-align:center} input.smk{width:96px;text-align:center}
   @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  /* Двухколоночный результат: слева графики и правка физиологии, справа —
+     интерпретации. Каждая колонка листается отдельно, чтобы оператор правил
+     текст, не теряя из вида диаграмму и матрицу. Узкий экран — обычная лента:
+     класс .on добавляется только когда интерпретация уже есть. */
+  .split-col{min-width:0}
+  @media(min-width:1240px){
+    main.wide{max-width:1720px}
+    .split.on{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:start}
+    /* sticky + своя прокрутка: сколько бы ни занимали шапка и баннеры, после
+       короткой прокрутки страницы обе колонки прилипают и занимают весь экран. */
+    .split.on>.split-col{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;padding-right:6px}
+    .split.on>.split-col>*:first-child{margin-top:0}
+    .split.on>.split-col::-webkit-scrollbar{width:9px}
+    .split.on>.split-col::-webkit-scrollbar-thumb{background:#d7dde3;border-radius:5px}
+  }
 </style></head><body>
 <header><a href="/" style="color:#b3203b"><b>НейроПро</b></a>
   <a href="?p=dashboard">Профили</a>
@@ -1002,7 +1031,7 @@ function layout(string $title, string $body, callable $h): void {
   <a href="?p=prompts">Промпты</a>
   <a href="/setup.php">Настройки</a>
 </header>
-<main>
+<main<?= !empty($opts['wide']) ? ' class="wide"' : '' ?>>
   <?php foreach ($warnings as $w): ?><div class="msg warn">⚠ <?= $h($w) ?> <a href="/setup.php">Настройки →</a></div><?php endforeach; ?>
   <?php if ($err): ?><div class="msg bad"><?= $h($err) ?></div><?php endif; ?>
   <?php if ($ok): ?><div class="msg ok"><?= $h($ok) ?></div><?php endif; ?>
