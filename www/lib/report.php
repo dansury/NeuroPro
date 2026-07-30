@@ -60,6 +60,19 @@ final class Report {
         $title = $h(($profile['name'] ?: 'Профиль') . ' — ' . ($profile['methodic'] ?: ''));
         $autoprint = !empty($opts['autoprint']);
 
+        // Шапка отчёта: печатаем ТОЛЬКО заполненные поля. Пустые ФИО/Возраст/Пол
+        // раньше уходили в PDF как «ФИО: , Возраст: , Пол: ;» — клиент видел
+        // пустые ярлыки и лишние «;» в конце строк (#1). Точек с запятой в конце
+        // строк больше нет — их тоже просили убрать.
+        $ident = [];
+        if (trim((string) ($profile['name'] ?? '')) !== '') $ident[] = 'ФИО: ' . $h($profile['name']);
+        if (trim((string) ($profile['age'] ?? '')) !== '')  $ident[] = 'Возраст: ' . $h($profile['age']);
+        if (trim((string) ($profile['sex'] ?? '')) !== '')  $ident[] = 'Пол: ' . $h($profile['sex']);
+        $metaLines = [];
+        if ($ident) $metaLines[] = implode(', ', $ident);
+        if (trim((string) ($profile['methodic'] ?? '')) !== '') $metaLines[] = 'Методика: ' . $h($profile['methodic']);
+        if (trim((string) ($profile['date'] ?? '')) !== '')     $metaLines[] = 'Дата исследования: ' . $h($profile['date']);
+
         ob_start(); ?>
 <!doctype html>
 <html lang="ru"><head>
@@ -103,11 +116,11 @@ final class Report {
     <div class="brand"><?= nl2br($h($brand)) ?></div>
   </div>
 
+  <?php if ($metaLines): ?>
   <div class="meta">
-    ФИО: <?= $h($profile['name']) ?>, Возраст: <?= $h($profile['age']) ?>, Пол: <?= $h($profile['sex']) ?>;<br>
-    Методика: <?= $h($profile['methodic']) ?>;<br>
-    Дата исследования: <?= $h($profile['date']) ?>.
+    <?= implode('<br>', $metaLines) ?>
   </div>
+  <?php endif; ?>
 
   <div class="figures">
     <div class="chart"><?= $svg ?></div>

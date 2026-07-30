@@ -227,6 +227,10 @@ function view_result(array $cfg, callable $h): void {
     // Список версий промптов для выбора вручную, если активная не задана (#8).
     $fam = Prompts::family($prof['test_key']);
     $famVersions = $fam ? Prompts::versions((int)$fam['id']) : [];
+    // Модели для выбора под кнопкой: по умолчанию — модель промпта, но оператор
+    // может переделать отчёт на другой нейросети (#3).
+    $models = LLM::modelsByGroup($cfg);
+    $defaultModel = (string)($active['model_id'] ?? ($famVersions[0]['model_id'] ?? ''));
     ob_start(); ?>
     <h1><?= $h($prof['name']) ?> <span class="muted">— <?= $h($prof['methodic']) ?></span></h1>
     <?php if ($phys !== null && $phys['error'] !== null): ?>
@@ -245,11 +249,12 @@ function view_result(array $cfg, callable $h): void {
       </div>
     <?php endif; ?>
     <?= phys_table_form($prof, $phys, (int)$p['id'], $h, $m, (string)($p['phys_image'] ?? '')) ?>
-    <form method="post" action="?p=interpret" class="row" id="interpform">
+    <form method="post" action="?p=interpret" id="interpform">
       <input type="hidden" name="id" value="<?= (int)$p['id'] ?>">
+      <div class="row">
       <span class="row" style="justify-content:flex-start;flex-wrap:wrap">
       <?php if ($active): ?>
-        <button class="btn" type="submit">▶ Составить интерпретацию (промпт v<?= $h($active['version_no']) ?>, <?= $h($active['model_id']) ?>)</button>
+        <button class="btn" type="submit">▶ Составить интерпретацию (промпт v<?= $h($active['version_no']) ?>)</button>
       <?php elseif ($famVersions): ?>
         <span class="muted">Промпт не выбран — выберите:</span>
         <select name="version_id">
@@ -267,6 +272,23 @@ function view_result(array $cfg, callable $h): void {
         <a class="btn ghost" href="?p=profile&id=<?= (int)$p['id'] ?>">Заменить скриншот</a>
         <a class="btn ghost danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ и все его интерпретации? Действие необратимо.')">🗑 Удалить анализ</a>
       </span>
+      </div>
+      <?php if (($active || $famVersions) && $models): ?>
+        <!-- Модель под кнопкой (#3): по умолчанию — из промпта; можно выбрать
+             другую и переделать отчёт — он добавится новой строкой в список
+             ниже, с этой моделью. -->
+        <label class="modelpick"><span>Нейросеть для отчёта — по умолчанию из промпта; выберите другую, чтобы переделать анализ на ней</span>
+          <select name="model_id">
+            <?php foreach ($models as $gname => $grows): ?>
+              <optgroup label="<?= $h((string)$gname) ?>">
+                <?php foreach ($grows as $mrow): ?>
+                  <option value="<?= $h($mrow['id']) ?>"<?= (string)$mrow['id'] === $defaultModel ? ' selected' : '' ?>><?= $h($mrow['label']) ?> — <?= $h($mrow['full_id']) ?></option>
+                <?php endforeach; ?>
+              </optgroup>
+            <?php endforeach; ?>
+          </select>
+        </label>
+      <?php endif; ?>
     </form>
     <?php if ($active || $famVersions): ?>
       <!-- Полоса хода: интерпретация идёт десятки секунд (два слоя — первый
@@ -627,6 +649,13 @@ function act_interpret(array $cfg): void {
     if (!$version) {
         redirect('?p=result&id=' . $id . '&err=' . urlencode('Для этой методики не выбран промпт (страница «Промпты»).'));
     }
+    // Оператор может выбрать модель прямо под кнопкой и переделать отчёт на
+    // другой нейросети — новая интерпретация добавится в список отдельной
+    // строкой со своей моделью (#3). По умолчанию берётся модель версии промпта.
+    $pickedId = trim((string)($_POST['model_id'] ?? ''));
+    $pickedRow = $pickedId !== '' ? LLM::findModel($pickedId) : null;
+    $effModel = $pickedRow ? (string)$pickedRow['id'] : (string)($version['model_id'] ?? '');
+    $effProvider = $pickedRow ? (string)($pickedRow['provider'] ?? '') : (string)($version['provider'] ?? '');
     // Нейросеть получает РАСЧЁТ (Metrics), а не сырой текст OCR: уровни,
     // достоверность и разделы считает код, модель только пишет текст.
     $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
@@ -636,11 +665,12 @@ function act_interpret(array $cfg): void {
     $metrics = Metrics::build($prof, $phys);
     // Ошибку нейросети показываем на странице результата, а не голой 500-й.
     try {
-        $res = Interpret::run($prof, $phys, $version, Interpret::styleVersion());
+        $res = Interpret::run($prof, $phys, $version, Interpret::styleVersion(),
+            $pickedRow ? $effModel : null, $pickedRow ? $effProvider : null);
     } catch (Throwable $e) {
         redirect('?p=result&id=' . $id . '&err=' . urlencode('Нейросеть недоступна, интерпретация не создана: ' . $e->getMessage()));
     }
-    Interpret::save($id, (int)$version['id'], $version['model_id'], $res['text'], $metrics, $res['style_version_id']);
+    Interpret::save($id, (int)$version['id'], $effModel, $res['text'], $metrics, $res['style_version_id']);
     // Сбой второго слоя не прячем: текст сохранён, но он без литературной правки.
     $msg = 'Интерпретация готова.'
          . ($res['style_error'] !== null ? ' Литературный слой не применён (' . $res['style_error'] . ').' : '');
@@ -943,6 +973,7 @@ function layout(string $title, string $body, callable $h): void {
   label{display:block;margin:10px 0} label span{display:block;color:#6b7682;margin-bottom:4px}
   input[type=text],textarea,select{width:100%;padding:8px 10px;border:1px solid #cfd6dd;border-radius:5px;font:inherit}
   .chk{display:flex;gap:8px;align-items:center} .chk input{width:auto}
+  .modelpick{max-width:560px;margin:10px 0 0}
   .chart{text-align:center} .chart svg{max-width:100%;height:auto}
   .legend{color:#6b7682;font-size:11px;line-height:1.6}
   .paste{border:2px dashed #cfd6dd;border-radius:6px;padding:24px;text-align:center;color:#8a949d;cursor:text}
