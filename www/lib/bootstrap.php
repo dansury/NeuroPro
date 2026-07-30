@@ -38,10 +38,11 @@ function np_boot(): array {
 const NP_PROMPT_V1_COMMENT = 'Импортировано из исходного промпта';
 const NP_PROMPT_V2_COMMENT = 'v2: адаптация под недорогие модели (DeepSeek и др.) — вход описан как распознанный текст скриншота';
 const NP_PROMPT_V3_COMMENT = 'v3: вся математика в коде (Metrics) — модель получает готовый расчёт и только пишет текст';
+const NP_PROMPT_V4_COMMENT = 'v4: расчёт, итоги методики и матрица показателей приходят готовыми; в отчёте клиента таблиц нет';
 
 /** Комментарии всех автосидируемых версий — по ним отличаем служебные от ручных. */
 function np_seeded_comments(): array {
-    return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT];
+    return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT];
 }
 
 /** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
@@ -88,31 +89,60 @@ function np_seed_prompts(array $cfg = []): void {
     np_heal_stub_prompts();
     np_seed_prompts_v2($model, $provider);
     np_seed_prompts_v3($model, $provider);
+    np_seed_prompts_v4($model, $provider);
     np_heal_seeded_models($model, $provider);
 }
 
 /**
  * Досидирует версии v3 — промпты под расчёт в коде (www/lib/metrics.php):
  * уровни, достоверность и разделы приходят готовыми, модель только пишет текст.
- * v3 становится активной, только если оператор ещё не выбирал версию сам
- * (активна нетронутая автосидированная v1/v2) — ручной выбор не перебиваем.
  */
 function np_seed_prompts_v3(string $model = 'yandexgpt', string $provider = 'yandex'): void {
-    $v3 = ['smu' => 'smu_v3.php', 'lsi' => 'lsi_v3.php', 'bd' => 'bd_v3.php'];
-    foreach ($v3 as $key => $file) {
+    np_seed_prompt_generation(
+        ['smu' => 'smu_v3.php', 'lsi' => 'lsi_v3.php', 'bd' => 'bd_v3.php'],
+        NP_PROMPT_V3_COMMENT,
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT],
+        $model, $provider
+    );
+}
+
+/**
+ * Досидирует версии v4 — промпты под отчёт БЕЗ таблиц: под диаграммой печатается
+ * матрица (www/lib/matrix.php), а модель получает готовыми ещё и итоги методики
+ * (суммы СМУ, напряжённость защит ИЖС, индексы Басса-Дарки) и зоны матрицы.
+ */
+function np_seed_prompts_v4(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    np_seed_prompt_generation(
+        ['smu' => 'smu_v4.php', 'lsi' => 'lsi_v4.php', 'bd' => 'bd_v4.php'],
+        NP_PROMPT_V4_COMMENT,
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT],
+        $model, $provider
+    );
+}
+
+/**
+ * Общий сидинг поколения промптов: заводит новую версию из вшитого файла и
+ * делает её активной, только если активна нетронутая автосидированная версия из
+ * $replaceable. Ручной выбор оператора и версии с интерпретациями не трогаем —
+ * история интерпретаций привязана к конкретной версии (Конституция, принцип V).
+ *
+ * @param array $files       test_key => имя файла в lib/prompts/
+ * @param string $comment    маркер поколения (он же признак идемпотентности)
+ * @param array $replaceable маркеры версий, которые можно снять с активной
+ */
+function np_seed_prompt_generation(array $files, string $comment, array $replaceable, string $model, string $provider): void {
+    foreach ($files as $key => $file) {
         $fam = Prompts::family($key);
         if (!$fam) continue;
         $promptId = (int) $fam['id'];
-        if (Db::one('SELECT id FROM prompt_versions WHERE prompt_id = ? AND comment = ?', [$promptId, NP_PROMPT_V3_COMMENT])) continue;
+        if (Db::one('SELECT id FROM prompt_versions WHERE prompt_id = ? AND comment = ?', [$promptId, $comment])) continue;
         $path = __DIR__ . '/prompts/' . $file;
         if (!is_file($path)) continue;
         $body = trim((string) require $path);
         if ($body === '') continue;
-        $versionId = Prompts::addVersion($promptId, $body, $model, $provider, NP_PROMPT_V3_COMMENT);
+        $versionId = Prompts::addVersion($promptId, $body, $model, $provider, $comment);
         $active = $fam['active_version_id'] ? Prompts::version((int) $fam['active_version_id']) : null;
-        // Автосидированную версию заменяем, ручную (или уже с интерпретациями) — нет.
-        if ($active === null
-            || in_array((string) ($active['comment'] ?? ''), [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT], true)) {
+        if ($active === null || in_array((string) ($active['comment'] ?? ''), $replaceable, true)) {
             Prompts::setActive($promptId, $versionId);
         }
     }
@@ -170,24 +200,12 @@ function np_heal_stub_prompts(): void {
 /**
  * Досидирует версии v2 — промпты, адаптированные под недорогие модели.
  * Тексты лежат в lib/prompts/*.php (внутри веб-корня, деплоятся через pull.php).
- * v2 становится активной, только если оператор ещё не трогал семейство
- * (активна нетронутая автосидированная v1) — ручной выбор версии не перебиваем.
  */
 function np_seed_prompts_v2(string $model = 'yandexgpt', string $provider = 'yandex'): void {
-    $v2 = ['smu' => 'smu_v2.php', 'lsi' => 'lsi_v2.php', 'bd' => 'bd_v2.php'];
-    foreach ($v2 as $key => $file) {
-        $fam = Prompts::family($key);
-        if (!$fam) continue;
-        $promptId = (int) $fam['id'];
-        if (Db::one('SELECT id FROM prompt_versions WHERE prompt_id = ? AND comment = ?', [$promptId, NP_PROMPT_V2_COMMENT])) continue;
-        $path = __DIR__ . '/prompts/' . $file;
-        if (!is_file($path)) continue;
-        $body = trim((string) require $path);
-        if ($body === '') continue;
-        $versionId = Prompts::addVersion($promptId, $body, $model, $provider, NP_PROMPT_V2_COMMENT);
-        $active = $fam['active_version_id'] ? Prompts::version((int) $fam['active_version_id']) : null;
-        if ($active === null || ((int) $active['version_no'] === 1 && ($active['comment'] ?? '') === NP_PROMPT_V1_COMMENT)) {
-            Prompts::setActive($promptId, $versionId);
-        }
-    }
+    np_seed_prompt_generation(
+        ['smu' => 'smu_v2.php', 'lsi' => 'lsi_v2.php', 'bd' => 'bd_v2.php'],
+        NP_PROMPT_V2_COMMENT,
+        [NP_PROMPT_V1_COMMENT],
+        $model, $provider
+    );
 }

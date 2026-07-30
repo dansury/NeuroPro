@@ -2,7 +2,15 @@
 /**
  * Branded client report renderer (Verdana). Produces a self-contained HTML
  * document with the logo header, the mathematical radar chart (SVG, cognitive +
- * physiological overlay), the scores table, and the interpretation text.
+ * physiological overlay), the matrix «когниция × эмоция» и the interpretation text.
+ *
+ * ТАБЛИЦ В ОТЧЁТЕ КЛИЕНТА НЕТ. Раньше под диаграммой печаталась таблица со
+ * баллами, «Знач.» и достоверностью — клиенту она читалась как медицинский
+ * протокол и требовала расшифровки. Те же соотношения показывает матрица
+ * (www/lib/matrix.php): по осям — когнитивный и эмоциональный ответ в единицах
+ * самого теста, цвет кружка — доминирующий параметр, размер — суммарная
+ * выраженность. Числа никуда не делись: их считает Metrics, а оператор видит их
+ * в полной таблице на странице результата.
  *
  * The same HTML is used for: on-screen preview, "download as PDF" (print CSS,
  * Verdana, A4), and the email body. No external assets — the logo is inlined as
@@ -10,6 +18,7 @@
  */
 
 require_once __DIR__ . '/chart.php';
+require_once __DIR__ . '/matrix.php';
 require_once __DIR__ . '/profile.php';
 require_once __DIR__ . '/metrics.php';
 
@@ -34,6 +43,8 @@ final class Report {
             'title' => Profile::chartTitle((string) ($profile['test_key'] ?? '')),
             'size'  => 600,
         ]);
+        // Матрица под диаграммой — она заменила таблицы отчёта.
+        $matrix = Matrix::svg($metrics, ['width' => 620]);
 
         $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
         $title = $h(($profile['name'] ?: 'Профиль') . ' — ' . ($profile['methodic'] ?: ''));
@@ -55,13 +66,8 @@ final class Report {
   .meta { margin: 14px 0 4px; }
   .chart { text-align: center; margin: 8px 0; }
   .chart svg { max-width: 100%; height: auto; }
-  table.scores { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 11px; table-layout: auto; }
-  table.scores th, table.scores td { border: 1px solid #c9d2da; padding: 4px 6px; text-align: left; }
-  table.scores th { background: #f4f6f8; }
-  table.scores td.num { text-align: center; white-space: nowrap; }
-  table.scores .dim { color: #8a949d; font-size: 10.5px; }
+  .matrix { page-break-inside: avoid; }
   .legend { color: #6b7682; font-size: 10.5px; margin: -4px 0 10px; }
-  .group { writing-mode: vertical-rl; transform: rotate(180deg); text-align: center; font-weight: bold; color: #6b7682; }
   .totals { margin: 8px 0 18px; }
   .interp { margin-top: 8px; }
   .interp h1, .interp h2, .interp h3 { color: #b3203b; font-size: 14px; margin: 16px 0 6px; }
@@ -86,7 +92,10 @@ final class Report {
 
   <div class="chart"><?= $svg ?></div>
 
-  <?= self::dataTable($metrics, $profile, $h) ?>
+  <?php if ($matrix !== ''): ?>
+    <div class="chart matrix"><?= $matrix ?></div>
+    <?= Matrix::legendHtml($metrics) ?>
+  <?php endif; ?>
 
   <?= self::totals($metrics, $profile, $h) ?>
 
@@ -102,84 +111,23 @@ final class Report {
     }
 
     /**
-     * ЕДИНСТВЕННАЯ таблица данных отчёта: балл, уровень, положение в профиле,
-     * «Знач.», достоверность и вывод — всё из Metrics.
-     *
-     * Раньше таблиц было две (баллы + физиология), а нейросеть печатала в тексте
-     * третью, свою — и они противоречили друг другу: у одной и той же шкалы
-     * достоверность была «—» в таблице сервиса и «p<0.05» в таблице модели.
-     * Теперь таблица одна, и её строит только код.
+     * Итоги методики — из общего списка Metrics::totals(): суммы мотивации СМУ,
+     * напряжённость защит ИЖС, индексы Басса-Дарки. Раньше отчёт считал суммы
+     * СМУ сам, в шаблоне, и нейросеть их не видела; теперь и отчёт, и промпт
+     * печатают один и тот же расчёт.
      */
-    private static function dataTable(array $metrics, array $profile, callable $h): string {
-        $axes = $metrics['axes'];
-        if (!$axes) return '';
-        $testKey = (string) ($profile['test_key'] ?? '');
-        $isSmu = $testKey === 'smu' && count($axes) === 12;
-        $hasPhys = !empty($metrics['has_phys']);
-
-        ob_start(); ?>
-<table class="scores">
-  <tr>
-    <th>Параметр</th><th>Балл</th><th>Уровень</th>
-    <?php if ($hasPhys): ?><th>Знач.</th><th>Физиология</th><th>Вывод</th><?php endif; ?>
-    <?php if ($isSmu): ?><th></th><?php endif; ?>
-  </tr>
-  <?php foreach ($axes as $i => $a):
-      $rowspanCell = '';
-      if ($isSmu && $i === 0) $rowspanCell = '<td class="group" rowspan="6">Мотивация достижения</td>';
-      if ($isSmu && $i === 6) $rowspanCell = '<td class="group" rowspan="6">Мотивация отношения</td>';
-      $style = $a['sig'] ? ' style="font-weight:bold"' : '';
-  ?>
-  <tr>
-    <td<?= $style ?>><?= $h($a['label']) ?></td>
-    <td class="num"><?= $h(self::num($a['score'])) ?> из <?= (int) $a['scale_max'] ?>
-      <span class="dim"><?= $h(self::num($a['pct'])) ?>%</span></td>
-    <td><?= $h($a['level_label']) ?><br><span class="dim"><?= $h($a['rank_label']) ?></span></td>
-    <?php if ($hasPhys): ?>
-      <td class="num"<?= $style ?>><?= $a['zna'] === null ? '—' : $h(self::num((float) $a['zna'])) ?>
-        <br><span class="dim"><?= $h($a['p_label']) ?></span></td>
-      <td><?= $h($a['phys_dir']) ?></td>
-      <td><?= $h($a['category_short']) ?></td>
-    <?php endif; ?>
-    <?= $rowspanCell ?>
-  </tr>
-  <?php endforeach; ?>
-</table>
-<?php if ($hasPhys): ?>
-<p class="legend">«Знач.» — столбец смысло-эмоциональной значимости Эгоскопа: 0 — медиана,
-  больше нуля — тело откликается сильнее обычного, меньше нуля — телесного отклика нет.
-  Жирным выделены достоверные отклонения (p&lt;0.05).</p>
-<?php endif;
-        return ob_get_clean();
-    }
-
-    /** Итоги методики: суммы СМУ и индексы Басса-Дарки (детерминированные). */
     private static function totals(array $metrics, array $profile, callable $h): string {
-        $scores = $profile['scores'] ?? [];
-        $testKey = (string) ($profile['test_key'] ?? '');
-        $isSmu = $testKey === 'smu' && count($scores) === 12;
-        $indices = $metrics['indices'] ?? [];
-        if (!$isSmu && !$indices) return '';
+        $totals = $metrics['totals'] ?? [];
+        if (!$totals) return '';
         ob_start(); ?>
 <div class="totals">
   Заключение:<br>
-  <?php if ($isSmu):
-      $ach = array_sum(array_map(fn ($s) => (float) $s['score'], array_slice($scores, 0, 6)));
-      $rel = array_sum(array_map(fn ($s) => (float) $s['score'], array_slice($scores, 6, 6))); ?>
-    Мотивация достижения: <?= $h((string) round($ach)) ?>.<br>
-    Мотивация отношения: <?= $h((string) round($rel)) ?>.<br>
-  <?php endif; ?>
-  <?php foreach ($indices as $name => $ix): ?>
-    <?= $h($name) ?> = <?= $h(self::num($ix['value'])) ?> из <?= (int) $ix['cap'] ?> (норма <?= $h(self::num($ix['min'])) ?>–<?= $h(self::num($ix['max'])) ?>) — <?= $h($ix['verdict']) ?>.<br>
+  <?php foreach ($totals as $t): ?>
+    <?= $h($t['text']) ?>.<br>
   <?php endforeach; ?>
 </div>
 <?php
         return ob_get_clean();
-    }
-
-    /** Compact number: 9.0 → "9", 3.5 → "3.5". */
-    private static function num(float $v): string {
-        return rtrim(rtrim(number_format($v, 1, '.', ''), '0'), '.');
     }
 
     private static function logoDataUri(string $path): string {
@@ -192,13 +140,90 @@ final class Report {
 
     /**
      * Текст интерпретации → HTML для отчёта. В отличие от mdToHtml вырезает
-     * таблицы: единственная таблица данных в отчёте — каноническая, из Metrics.
-     * Таблица от нейросети — это те же числа, пересказанные второй раз, и она
-     * расходилась с расчётом (у Обиды достоверность «—» против «p<0.05»).
+     * таблицы: в отчёте клиента таблиц нет вообще — соотношения показывает
+     * матрица. Таблица от нейросети — это те же числа, пересказанные второй раз,
+     * и она расходилась с расчётом (у Обиды достоверность «—» против «p<0.05»).
      * Применяется и к старым интерпретациям, сделанным до промптов v3.
      */
     public static function interpToHtml(string $md): string {
         return self::mdToHtml(self::stripTables($md));
+    }
+
+    /**
+     * ─── Правка интерпретации по абзацам ───────────────────────────────────
+     *
+     * Отчёт правится ДО выгрузки в PDF: оператор двойным кликом открывает абзац
+     * и переписывает его. Единица правки — блок Markdown (абзац, заголовок или
+     * список), а не HTML: в базе лежит текст нейросети, и правка должна остаться
+     * тем же текстом, иначе следующий PDF собрать уже нечем.
+     *
+     * Нумерация блоков одинакова при показе и при сохранении, потому что оба
+     * пути начинаются с normalizeForEdit(): без этого удалённая таблица от
+     * модели сдвигала индексы, и правка уходила не в тот абзац.
+     */
+
+    /** Канонический вид текста для правки: без таблиц модели, без лишних пустых строк. */
+    public static function normalizeForEdit(string $md): string {
+        $text = str_replace("\r\n", "\n", self::stripTables($md));
+        return trim((string) preg_replace('/\n{3,}/', "\n\n", $text));
+    }
+
+    /**
+     * Блоки Markdown — по одному на правку. Кроме пустых строк режем и по
+     * заголовкам: модель часто пишет заголовок и абзац без пустой строки между
+     * ними, а править заголовок вместе с текстом неудобно. Список остаётся одним
+     * блоком: разбитый по пунктам, он при сборке превратился бы в несколько
+     * списков подряд.
+     */
+    public static function editBlocks(string $md): array {
+        $norm = self::normalizeForEdit($md);
+        if ($norm === '') return [];
+        $out = [];
+        foreach (preg_split('/\n[ \t]*\n/', $norm) ?: [] as $chunk) {
+            $rest = [];
+            foreach (preg_split('/\n/', trim($chunk)) as $line) {
+                if (preg_match('/^#{1,3}\s+\S/', $line)) {
+                    if ($rest) { $out[] = implode("\n", $rest); $rest = []; }
+                    $out[] = trim($line);
+                    continue;
+                }
+                $rest[] = $line;
+            }
+            if ($rest) $out[] = implode("\n", $rest);
+        }
+        return array_values(array_filter(array_map('trim', $out), static fn ($b) => $b !== ''));
+    }
+
+    /**
+     * Заменяет один блок. Пустой текст = удалить абзац (оператор так убирает
+     * лишнее). Возвращает новый полный текст интерпретации.
+     */
+    public static function replaceBlock(string $md, int $index, string $newText): string {
+        $blocks = self::editBlocks($md);
+        if (!array_key_exists($index, $blocks)) {
+            throw new RuntimeException('Абзац не найден: текст изменился, обновите страницу.');
+        }
+        $new = trim(str_replace("\r\n", "\n", $newText));
+        if ($new === '') unset($blocks[$index]);
+        else $blocks[$index] = $new;
+        return implode("\n\n", array_values($blocks));
+    }
+
+    /**
+     * Интерпретация для страницы результата: каждый блок обёрнут в контейнер с
+     * номером и исходным Markdown, чтобы правка открывалась ровно тем текстом,
+     * который лежит в базе.
+     */
+    public static function interpToEditableHtml(string $md): string {
+        $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
+        $out = [];
+        foreach (self::editBlocks($md) as $i => $block) {
+            $out[] = '<div class="np-block" data-block="' . $i . '" data-src="' . $h($block)
+                   . '" title="Двойной клик — редактировать">' . self::mdToHtml($block) . '</div>';
+        }
+        if (!$out) $out[] = '<div class="np-block" data-block="0" data-src="">'
+                          . '<p class="muted">Текст пуст.</p></div>';
+        return implode("\n", $out);
     }
 
     /** Убирает Markdown-таблицы (и их заголовок, если он остался пустым). */

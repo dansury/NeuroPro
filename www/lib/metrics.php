@@ -15,7 +15,10 @@
  *    (модуль не значит ничего, кроме силы отклонения);
  *  - достоверность — по p из столбца «Достоверность»;
  *  - категория шкалы — по таблице «уровень × физиология × достоверность»;
- *  - индексы методики — суммой шкал с нормами.
+ *  - итоги методики (индексы Басса-Дарки, суммы мотивации СМУ, напряжённость
+ *    защит ИЖС) — суммами шкал с нормами, единым списком для любого теста;
+ *  - координаты шкалы в матрице «когниция × эмоция», доминирующий параметр
+ *    СМК и вес точки — для Matrix (www/lib/matrix.php).
  */
 
 declare(strict_types=1);
@@ -44,6 +47,37 @@ final class Metrics {
      * поэтому −12 всегда упиралось в центр, а −3 в другом отчёте — тоже).
      */
     public const PHYS_SCALE_LADDER = [1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0];
+
+    /**
+     * Зоны матрицы «когниция × эмоция» (www/lib/matrix.php). Зона — это та же
+     * пара «уровень × физиология», что и категория раздела, но названная в
+     * терминах положения точки на матрице: раздел отчёта отвечает на «о чём
+     * писать», зона — на «где кружок и каким он выглядит».
+     */
+    public const MATRIX_ZONES = [
+        'both'    => 'выражено в ответах и подтверждено телом',
+        'body'    => 'тело откликается сильнее ответов',
+        'mind'    => 'выражено в ответах без телесного напряжения',
+        'middle'  => 'середина: ни выраженности, ни телесного отклика',
+        'flat'    => 'фон: низкая выраженность и нет телесного отклика',
+        'unknown' => 'физиология по шкале не распознана — только когнитивный ответ',
+    ];
+
+    /**
+     * Смысловые группы мотивов СМУ. Итоги считает код: раньше «результат или
+     * процесс» модель складывала сама по тексту промпта и путала состав групп.
+     * Ключ группы → подписи шкал ровно как в выгрузке.
+     */
+    public const SMU_GROUPS = [
+        'Мотивы результата' => ['Мотив достижения успеха', 'Состязательный мотив', 'Мотив значения результатов', 'Мотив сложности заданий'],
+        'Мотивы процесса и отношения к делу' => ['Внутренний мотив', 'Познавательный мотив', 'Мотив личностного осмысления работы', 'Мотив позитивного личностного ожидания'],
+    ];
+
+    /**
+     * ИЖС/LSI: защита считается напряжённой при выраженности выше 50 % —
+     * методический порог Плутчика–Келлермана–Конте, а не наша оценка.
+     */
+    public const LSI_TENSION_PCT = 50.0;
 
     /** Категории шкал: ключ → [заголовок раздела, короткая метка, смысл для промпта]. */
     public const CATEGORIES = [
@@ -144,6 +178,15 @@ final class Metrics {
                 'category' => $category,
                 'category_title' => self::CATEGORIES[$category]['title'],
                 'category_short' => self::CATEGORIES[$category]['short'],
+                // Матрица: обе координаты в процентах одной шкалы, доминирующий
+                // параметр СМК, вес точки и зона — всё считается здесь, до
+                // нейросети (Конституция, принцип I).
+                'cog_pct' => round($pct, 1),
+                'phys_pct' => self::physPct($zna, $physScale),
+                'dominant' => self::dominant($smk),
+                'dominant_strong' => $smk !== '' && str_contains($smk, '*'),
+                'weight' => self::weight($pct, $zna, $physScale),
+                'matrix_zone' => self::zone($level, $physState),
             ];
         }
 
@@ -163,15 +206,154 @@ final class Metrics {
         $groups = array_fill_keys(array_keys(self::CATEGORIES), []);
         foreach ($axes as $i => $axis) $groups[$axis['category']][] = $i;
 
+        $indices = $testKey === 'bd' ? Profile::bdIndices($scores) : [];
+
         return [
             'test_key' => $testKey,
             'axes' => $axes,
             'groups' => $groups,
-            'indices' => $testKey === 'bd' ? Profile::bdIndices($scores) : [],
+            'indices' => $indices,
+            // Итоги методики единым списком: у каждого теста свои, но формат один,
+            // поэтому и отчёт, и промпт печатают их одним циклом.
+            'totals' => self::totals($testKey, $axes, $indices),
             'phys_scale' => $physScale,
+            'mid_band' => $midBand,
+            'unit' => self::unit($testKey, $axes),
             'has_phys' => Phys::hasData($phys),
             'warnings' => $warnings,
         ];
+    }
+
+    /**
+     * Итоги методики — суммы и индексы с нормами. Раньше суммы СМУ считал только
+     * отчёт (в шаблоне), нейросеть их вообще не видела и придумывала свои, а у
+     * ИЖС итога не было совсем. Теперь список один и уходит и в отчёт, и в промпт.
+     *
+     * @return array<int, array{label:string,value:float,cap:float|null,unit:string,
+     *                          min:float|null,max:float|null,verdict:string,text:string}>
+     */
+    public static function totals(string $testKey, array $axes, array $indices = []): array {
+        $out = [];
+        $add = static function (string $label, float $value, ?float $cap, string $unit,
+                                ?float $min = null, ?float $max = null, string $detail = '') use (&$out): void {
+            $verdict = '';
+            if ($min !== null || $max !== null) {
+                if ($max !== null && $value > $max) $verdict = 'выше нормы';
+                elseif ($min !== null && $value < $min) $verdict = 'ниже нормы';
+                else $verdict = 'в норме';
+            }
+            $norm = match (true) {
+                $min !== null && $max !== null => 'норма ' . self::num($min) . '–' . self::num($max),
+                $max !== null                  => 'норма до ' . self::num($max) . ($unit === '%' ? ' %' : ''),
+                $min !== null                  => 'норма от ' . self::num($min) . ($unit === '%' ? ' %' : ''),
+                default                        => '',
+            };
+            $text = $label . ' — ' . self::num($value)
+                  . ($unit === '%' ? ' % от максимума' : ($cap !== null ? ' из ' . self::num($cap) : ''))
+                  . ($detail !== '' ? ' (' . $detail . ')' : '')
+                  . ($norm !== '' ? ' (' . $norm . ')' : '')
+                  . ($verdict !== '' ? ' — ' . $verdict : '');
+            $out[] = ['label' => $label, 'value' => $value, 'cap' => $cap, 'unit' => $unit,
+                      'min' => $min, 'max' => $max, 'verdict' => $verdict, 'detail' => $detail, 'text' => $text];
+        };
+
+        if ($testKey === 'smu' && count($axes) === 12) {
+            // Половины теста заданы порядком шкал в выгрузке (1–6 и 7–12).
+            $sum = static fn (array $part) => array_sum(array_map(static fn ($a) => (float) $a['score'], $part));
+            $cap = static fn (array $part) => array_sum(array_map(static fn ($a) => (float) $a['scale_max'], $part));
+            $first = array_slice($axes, 0, 6);
+            $second = array_slice($axes, 6, 6);
+            $add('Мотивация достижения', $sum($first), $cap($first), '');
+            $add('Мотивация отношения', $sum($second), $cap($second), '');
+        }
+
+        // Смысловые группы шкал: сравнимы только в процентах от своих максимумов.
+        foreach (self::groupDefs($testKey) as $name => $labels) {
+            $part = array_values(array_filter($axes, static fn ($a) => in_array($a['label'], $labels, true)));
+            if (count($part) !== count($labels)) continue; // нет всех шкал — не выдумываем
+            $score = array_sum(array_map(static fn ($a) => (float) $a['score'], $part));
+            $cap = array_sum(array_map(static fn ($a) => (float) $a['scale_max'], $part));
+            $add($name, $cap > 0 ? round($score / $cap * 100.0, 1) : 0.0, 100.0, '%',
+                null, null, self::num($score) . ' из ' . self::num($cap) . ' по ' . count($part) . ' шкалам');
+        }
+
+        if ($testKey === 'lsi' && $axes) {
+            // Общая напряжённость защит — средняя выраженность по всем защитам;
+            // напряжённой считается защита выше порога LSI_TENSION_PCT.
+            $avg = array_sum(array_map(static fn ($a) => (float) $a['pct'], $axes)) / count($axes);
+            $tense = array_values(array_filter($axes, static fn ($a) => (float) $a['pct'] > self::LSI_TENSION_PCT));
+            $add('Общая напряжённость защит', round($avg, 1), 100.0, '%', null, self::LSI_TENSION_PCT);
+            $add('Напряжённых защит (выше ' . self::num(self::LSI_TENSION_PCT) . ' %)',
+                (float) count($tense), (float) count($axes), '', null, null,
+                $tense ? implode(', ', array_map(static fn ($a) => $a['label'], $tense)) : 'ни одной');
+        }
+
+        foreach ($indices as $name => $ix) {
+            $add($name, (float) $ix['value'], (float) $ix['cap'], '', (float) $ix['min'], (float) $ix['max']);
+        }
+        return $out;
+    }
+
+    /** Смысловые группы шкал теста (пока заданы только у СМУ). */
+    private static function groupDefs(string $testKey): array {
+        return $testKey === 'smu' ? self::SMU_GROUPS : [];
+    }
+
+    /**
+     * Единицы когнитивной оси матрицы — «как в самом тесте». Если у всех шкал
+     * максимум общий (СМУ — 10 баллов, ИЖС — 100 %), ось подписываем в этих
+     * единицах; у Басса-Дарки максимумы разные (5…13), и единственная сравнимая
+     * подпись — процент от максимума своей шкалы.
+     */
+    public static function unit(string $testKey, array $axes): array {
+        $maxes = array_unique(array_map(static fn ($a) => (float) $a['scale_max'], $axes));
+        if ($testKey === 'lsi') return ['max' => 100.0, 'suffix' => '%', 'title' => 'выраженность, %'];
+        if (count($maxes) === 1) {
+            $m = (float) reset($maxes);
+            return ['max' => $m, 'suffix' => '', 'title' => 'баллы теста (0…' . self::num($m) . ')'];
+        }
+        return ['max' => 100.0, 'suffix' => '%', 'title' => '% от максимума своей шкалы'];
+    }
+
+    /** «Знач.» → положение на процентной шкале матрицы (медиана = 50 %). */
+    public static function physPct(?float $zna, float $physScale): ?float {
+        if ($zna === null || $physScale <= 0) return null;
+        return round(max(0.0, min(100.0, 50.0 + 50.0 * $zna / $physScale)), 1);
+    }
+
+    /** Доминирующий параметр СМК: «Z>X>Y» → «Z». Пусто, если столбец не распознан. */
+    public static function dominant(string $smk): string {
+        if ($smk === '') return '';
+        $letter = strtoupper(substr(ltrim($smk, '*'), 0, 1));
+        return in_array($letter, ['X', 'Y', 'Z'], true) ? $letter : '';
+    }
+
+    /**
+     * Вес точки матрицы (0…1) — выраженность суммы когнитивного и эмоционального
+     * ответа: от неё зависит размер кружка. Обе доли считаются по своей шкале,
+     * поэтому складывать их корректно. Без физиологии вес — только когнитивный
+     * (половина суммы отсутствует, и придумывать её нельзя).
+     */
+    public static function weight(float $pct, ?float $zna, float $physScale): float {
+        $cog = max(0.0, min(1.0, $pct / 100.0));
+        $physPct = self::physPct($zna, $physScale);
+        if ($physPct === null) return round($cog, 3);
+        return round(($cog + $physPct / 100.0) / 2.0, 3);
+    }
+
+    /**
+     * Зона матрицы по уровню выраженности и положению физиологии. Нераспознанная
+     * физиология — отдельная зона: назвать такую шкалу «выраженной без телесного
+     * напряжения» значило бы выдать отсутствие данных за отсутствие отклика.
+     */
+    public static function zone(string $level, ?string $physState): string {
+        if ($physState === null) return 'unknown';
+        if ($physState === 'above') return $level === 'high' ? 'both' : 'body';
+        return match ($level) {
+            'high' => 'mind',
+            'mid'  => 'middle',
+            default => 'flat',
+        };
     }
 
     public const LEVEL_LABELS = ['low' => 'низкий', 'mid' => 'средний', 'high' => 'высокий'];
