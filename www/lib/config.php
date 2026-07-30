@@ -146,8 +146,11 @@ $config = [
     'MATRIX_LOW_PCT'        => cfg_env('MATRIX_LOW_PCT', '40'),
     'MATRIX_HIGH_PCT'       => cfg_env('MATRIX_HIGH_PCT', '60'),
     'MATRIX_MID_BAND_PCT'   => cfg_env('MATRIX_MID_BAND_PCT', '5'),
-    // Мультипликатор размера кружка: радиус ∝ вес^POWER. >1 — разница заметнее.
-    'MATRIX_SIZE_POWER'     => cfg_env('MATRIX_SIZE_POWER', '2'),
+    // Контраст размеров кружков: НАСКОЛЬКО они отличаются друг от друга, а не
+    // насколько крупные (0 — все одинаковые, 1 — естественный разброс профиля,
+    // больше — разница подчёркнута). Ключ настройки оставлен прежним, чтобы
+    // значение, уже сохранённое оператором, не потерялось при обновлении.
+    'MATRIX_SIZE_POWER'     => cfg_env('MATRIX_SIZE_POWER', '1'),
 
     'LLM_TIMEOUT_SEC'       => (int) cfg_env('LLM_TIMEOUT_SEC', '120'),
     'LLM_MAX_RETRIES'       => (int) cfg_env('LLM_MAX_RETRIES', '2'),

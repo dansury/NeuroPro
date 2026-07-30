@@ -43,10 +43,13 @@ const NP_PROMPT_V2_COMMENT = 'v2: адаптация под недорогие �
 const NP_PROMPT_V3_COMMENT = 'v3: вся математика в коде (Metrics) — модель получает готовый расчёт и только пишет текст';
 const NP_PROMPT_V4_COMMENT = 'v4: расчёт, итоги методики и матрица показателей приходят готовыми; в отчёте клиента таблиц нет';
 const NP_PROMPT_V5_COMMENT = 'v5: глубина отчёта у недорогих моделей — скелет разбора шкалы, объём, СМК всегда, конкретные рекомендации';
+const NP_PROMPT_V6_COMMENT = 'v6: содержательность вместо многословности — запрет повторов, разделы по методике, язык правит второй слой';
+const NP_PROMPT_STYLE_COMMENT = 'Второй слой: литературная правка готового отчёта (язык, краткость; факты не трогает)';
 
 /** Комментарии всех автосидируемых версий — по ним отличаем служебные от ручных. */
 function np_seeded_comments(): array {
-    return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT, NP_PROMPT_V5_COMMENT];
+    return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
+            NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_STYLE_COMMENT];
 }
 
 /** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
@@ -57,6 +60,9 @@ function np_prompt_families(): array {
         'bd'  => ['v1' => 'bd_v1.php',  'src' => 'BD PROMPT.txt',  'name' => 'Интерпретация Басса-Дарки (агрессивность и враждебность)'],
     ];
 }
+
+/** Имя семейства второго слоя — оно НЕ методика, поэтому живёт отдельно. */
+const NP_STYLE_PROMPT_NAME = 'Литературная правка отчёта (второй слой, любая методика)';
 
 /**
  * Текст исходного (v1) промпта семейства. Приоритет:
@@ -95,7 +101,45 @@ function np_seed_prompts(array $cfg = []): void {
     np_seed_prompts_v3($model, $provider);
     np_seed_prompts_v4($model, $provider);
     np_seed_prompts_v5($model, $provider);
+    np_seed_prompts_v6($model, $provider);
+    np_seed_style_prompt($model, $provider);
     np_heal_seeded_models($model, $provider);
+}
+
+/**
+ * Досидирует версии v6 — промпты «на содержательность». v5 добивался глубины
+ * требованием объёма («не меньше 700 слов»), и недорогая модель набирала его
+ * повторами: несколько шкал подряд получали дословно одинаковый абзац про
+ * телесную реакцию. v6 требование объёма снимает, запрещает повторы и опирается
+ * на разделы, названные в терминах методики (Metrics::CATEGORY_BY_TEST), а язык
+ * отдаёт второму слою.
+ */
+function np_seed_prompts_v6(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    np_seed_prompt_generation(
+        ['smu' => 'smu_v6.php', 'lsi' => 'lsi_v6.php', 'bd' => 'bd_v6.php'],
+        NP_PROMPT_V6_COMMENT,
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT, NP_PROMPT_V5_COMMENT],
+        $model, $provider
+    );
+}
+
+/**
+ * Семейство промптов ВТОРОГО СЛОЯ — литературной правки готового отчёта.
+ * Это не методика: у него нет своих тестов и профилей, оно применяется к
+ * результату любого первого слоя. Заводится один раз; дальше оператор правит и
+ * версионирует его на странице «Промпты», как остальные. Если снять активную
+ * версию, второй слой просто перестаёт применяться.
+ */
+function np_seed_style_prompt(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    $path = __DIR__ . '/prompts/style_v1.php';
+    if (!is_file($path)) return;
+    $body = trim((string) require $path);
+    if ($body === '') return;
+    // Семейство заводится ОДИН раз. Если оно уже есть — не трогаем ничего:
+    // отсутствие активной версии здесь означает «слой выключен оператором», а
+    // не «надо досидировать» (Prompts::deleteVersion умеет снимать активную).
+    if (Prompts::family(Interpret::STYLE_KEY)) return;
+    Prompts::seed(Interpret::STYLE_KEY, NP_STYLE_PROMPT_NAME, $body, $model, $provider, NP_PROMPT_STYLE_COMMENT);
 }
 
 /**

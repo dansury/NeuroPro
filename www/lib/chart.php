@@ -53,15 +53,28 @@ final class Chart {
      * нормировка, шкала физиологии и достоверность уже посчитаны там.
      */
     public static function fromMetrics(array $metrics, array $opts = []): string {
-        $labels = $cog = $physVals = $sig = [];
+        $labels = $cog = $physVals = $sig = $scores = [];
+        // Единицы когнитивной оси — «как в самом тесте»: у ИЖС это проценты, у
+        // СМУ баллы 0…10, у Басса-Дарки максимумы шкал разные, поэтому балл без
+        // своего максимума не читается.
+        $unit = $metrics['unit'] ?? [];
+        $sameMax = ($unit['suffix'] ?? '%') !== '%';
         foreach ($metrics['axes'] as $a) {
             $labels[]   = $a['short'];
             $cog[]      = $a['pct'];                 // уже % от максимума своей шкалы
             $physVals[] = $a['zna'];
             $sig[]      = $a['sig'];
+            // Результат теста у подписи оси — для ЛЮБОЙ методики, а не только у
+            // ИЖС, где он совпадал с процентом на кольцах (#3).
+            $scores[]   = ($metrics['test_key'] ?? '') === 'lsi'
+                ? self::num((float) $a['pct']) . ' %'
+                : ($sameMax
+                    ? self::num((float) $a['score'])
+                    : self::num((float) $a['score']) . ' из ' . (int) $a['scale_max']);
         }
         return self::render($labels, $cog, $physVals, $sig, $opts + [
             'phys_scale' => $metrics['phys_scale'] ?? 0.0,
+            'axis_values' => $scores,
         ]);
     }
 
@@ -153,8 +166,10 @@ final class Chart {
                 default => 2 * min($lx, $size - $lx) - 6,
             };
             // Достоверное отклонение выделяем и на подписи оси, а не только точкой:
-            // так шкалы с p<0.05 видно с первого взгляда (#5).
-            $svg[] = self::wrapLabel((string) $labels[$i], $lx, $ly, $anchor, !empty($sig[$i]), (float) $room);
+            // так шкалы с p<0.05 видно с первого взгляда (#5). Под подписью —
+            // сам результат теста по этой шкале (#3).
+            $svg[] = self::wrapLabel((string) $labels[$i], $lx, $ly, $anchor, !empty($sig[$i]), (float) $room,
+                (string) ($opts['axis_values'][$i] ?? ''));
         }
 
         // Physiological overlay first (drawn under cognitive so the line reads on top).
@@ -291,7 +306,7 @@ final class Chart {
         return implode("\n", $out);
     }
 
-    private static function wrapLabel(string $text, float $x, float $y, string $anchor, bool $bold = false, float $room = 0.0): string {
+    private static function wrapLabel(string $text, float $x, float $y, string $anchor, bool $bold = false, float $room = 0.0, string $value = ''): string {
         // Honor explicit line breaks; otherwise split long labels onto 2 lines.
         if (strpos($text, "\n") !== false) {
             $lines = explode("\n", trim($text));
@@ -319,12 +334,21 @@ final class Chart {
                 if (count($fit) <= 2 || $try === 7.5) { $lines = $fit; break; }
             }
         }
+        // Строка со значением идёт последней и считается в общей высоте блока,
+        // иначе подпись съезжала бы вверх относительно своей оси.
+        $total = count($lines) + ($value !== '' ? 1 : 0);
         $lh = round($fs + 1.5, 1);
-        $dy0 = count($lines) > 1 ? -($lh / 2 - 1) : 4;
+        $dy0 = $total > 1 ? -($lh * ($total - 1) / 2 - 1) : 4;
         $out = '<text x="' . round($x, 1) . '" y="' . round($y + $dy0, 1) . '" text-anchor="' . $anchor . '" font-size="' . self::num($fs) . '"'
              . ($bold ? ' font-weight="bold"' : '') . ' fill="' . self::TEXT . '">';
         foreach ($lines as $k => $ln) {
             $out .= '<tspan x="' . round($x, 1) . '" dy="' . ($k === 0 ? 0 : $lh) . '">' . self::esc($ln) . '</tspan>';
+        }
+        if ($value !== '') {
+            // Цветом кривой ответов теста: значение относится к синему полигону,
+            // а не к оранжевой физиологии.
+            $out .= '<tspan x="' . round($x, 1) . '" dy="' . ($lines ? $lh : 0) . '" font-weight="bold" fill="'
+                  . self::COG_TEXT . '">' . self::esc($value) . '</tspan>';
         }
         $out .= '</text>';
         return $out;

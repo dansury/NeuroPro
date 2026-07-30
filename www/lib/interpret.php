@@ -12,19 +12,85 @@ require_once __DIR__ . '/profile.php';
 require_once __DIR__ . '/metrics.php';
 
 final class Interpret {
+    /** Ключ семейства промптов второго слоя (литературная правка). */
+    public const STYLE_KEY = 'style';
+
     /**
+     * Интерпретация в ДВА СЛОЯ.
+     *
+     * Слой 1 — содержание: модель получает готовый расчёт и раскладывает его по
+     * разделам. Слой 2 — язык: отдельный промпт (семейство «style») переписывает
+     * готовый текст короче и живее, не трогая факты. Разделение нужно потому,
+     * что недорогие модели не тянут обе задачи сразу: когда от них требовали и
+     * точность, и литературность, они добирали объём повторами.
+     *
+     * Второй слой не обязателен: если у семейства «style» нет активной версии,
+     * клиент получает текст первого слоя. Сбой второго слоя тоже не теряет
+     * работу — возвращается текст первого (о причине пишем в лог).
+     *
      * @param array      $profile profile array
      * @param array|null $phys    структура Phys::decode (или null)
      * @param array      $version prompt_versions row to use
-     * @return string interpretation text
+     * @param array|null $style   версия промпта второго слоя (null — не применять)
+     * @return array{text:string,draft:string,style_version_id:?int,style_error:?string}
      */
-    public static function run(array $profile, ?array $phys, array $version): string {
+    public static function run(array $profile, ?array $phys, array $version, ?array $style = null): array {
         if (!empty($version['model_id'])) LLM::setModelOverride($version['model_id']);
         if (!empty($version['provider'])) LLM::setProviderOverride($version['provider']);
 
         $system = (string) $version['body'];
         $user = self::buildUserMessage($profile, $phys);
-        return trim(LLM::chatText($system, $user, null, 0.6));
+        $draft = trim(LLM::chatText($system, $user, null, 0.6));
+
+        $out = ['text' => $draft, 'draft' => $draft, 'style_version_id' => null, 'style_error' => null];
+        if ($style === null || trim((string) ($style['body'] ?? '')) === '' || $draft === '') return $out;
+
+        try {
+            if (!empty($style['model_id'])) LLM::setModelOverride($style['model_id']);
+            LLM::setProviderOverride(!empty($style['provider']) ? (string) $style['provider'] : null);
+            // Температура ниже, чем у первого слоя: это правка, а не сочинение.
+            $edited = trim(LLM::chatText((string) $style['body'], self::buildStyleMessage($profile, $phys, $draft), null, 0.4));
+            // Пустой или подозрительно куцый ответ — не правка, а потеря текста:
+            // редактор мог «сократить» отчёт до пары абзацев или вернуть отказ.
+            // Лучше отдать исходный текст, чем обрезанный (Конституция, принцип II).
+            if ($edited === '' || mb_strlen($edited) < mb_strlen($draft) * 0.4) {
+                $out['style_error'] = 'второй слой вернул слишком короткий текст — оставлен исходный';
+                return $out;
+            }
+            $out['text'] = $edited;
+            $out['style_version_id'] = (int) $style['id'];
+        } catch (Throwable $e) {
+            $out['style_error'] = $e->getMessage();
+        }
+        return $out;
+    }
+
+    /**
+     * Сообщение второму слою: сам текст плюс факты, которые обязаны дожить до
+     * финального отчёта. Список фактов — это не материал для новых абзацев, а
+     * ограничение: редактор без него легко «улучшает» спокойный показатель в
+     * напряжённый, потому что так звучит выразительнее.
+     */
+    public static function buildStyleMessage(array $profile, ?array $phys, string $draft): string {
+        $m = Metrics::build($profile, $phys);
+        $lines = [];
+        $lines[] = 'ФАКТЫ, КОТОРЫЕ ОБЯЗАНЫ СОХРАНИТЬСЯ (проверь по ним итог; в текст их не переписывай):';
+        foreach ($m['axes'] as $a) {
+            if ($a['category'] === 'skip') continue;
+            $lines[] = sprintf('- %s: раздел «%s»; %s.', $a['label'], $a['category_title'],
+                $a['zna'] === null ? 'о телесной реакции не пишем — физиология не распознана' : $a['phys_label']);
+        }
+        $skipped = array_map(static fn ($i) => $m['axes'][$i]['label'], $m['groups']['skip'] ?? []);
+        if ($skipped) $lines[] = '- НЕ ДОЛЖНЫ ПОЯВИТЬСЯ В ТЕКСТЕ: ' . implode(', ', $skipped) . '.';
+        $lines[] = '';
+        $lines[] = 'ОТЧЁТ ДЛЯ ПРАВКИ:';
+        $lines[] = $draft;
+        return implode("\n", $lines);
+    }
+
+    /** Активная версия промпта второго слоя (или null, если слой отключён). */
+    public static function styleVersion(): ?array {
+        return Prompts::activeVersion(self::STYLE_KEY);
     }
 
     /**
@@ -94,14 +160,15 @@ final class Interpret {
 
         $lines[] = self::matrixBlock($m);
 
+        $testKey = (string) ($m['test_key'] ?? '');
         $lines[] = 'РАЗДЕЛЫ ОТЧЁТА И ИХ СОСТАВ (иных шкал в разделе быть не может, шкала — ровно в одном разделе):';
         $anySection = false;
         foreach ($m['groups'] as $cat => $idxs) {
             if (!$idxs || $cat === 'skip') continue;
             $anySection = true;
             $names = array_map(static fn ($i) => $m['axes'][$i]['label'], $idxs);
-            $lines[] = sprintf('- %s: %s', Metrics::CATEGORIES[$cat]['title'], implode(', ', $names));
-            $lines[] = '  (смысл раздела: ' . Metrics::CATEGORIES[$cat]['meaning'] . ')';
+            $lines[] = sprintf('- %s: %s', Metrics::categoryTitle($cat, $testKey), implode(', ', $names));
+            $lines[] = '  (смысл раздела: ' . Metrics::categoryMeaning($cat, $testKey) . ')';
         }
         if (!$anySection) $lines[] = '- ни одна шкала не попала в разделы: напиши только общее спокойное резюме.';
         $skipped = array_map(static fn ($i) => $m['axes'][$i]['label'], $m['groups']['skip'] ?? []);
@@ -156,11 +223,53 @@ final class Interpret {
         return implode("\n", $lines);
     }
 
-    /** Persist an interpretation against the exact version used. */
-    public static function save(int $profileId, int $versionId, ?string $modelId, string $content): int {
+    /**
+     * Persist an interpretation against the exact version used.
+     *
+     * Вместе с текстом сохраняем СЛОЙ МАТЕМАТИКИ — снимок расчёта, по которому
+     * писалась эта интерпретация (пороги оператора, уровни, разделы, итоги).
+     * Пороги матрицы общие для сервиса и меняются мышью прямо на картинке;
+     * без снимка отчёт, собранный назавтра, считался бы по новым порогам и
+     * расходился бы с текстом, который читал клиент (#14).
+     *
+     * @param array|null $metrics результат Metrics::build() на момент интерпретации
+     */
+    public static function save(int $profileId, int $versionId, ?string $modelId, string $content,
+                                ?array $metrics = null, ?int $styleVersionId = null): int {
         return Db::insert(
-            'INSERT INTO interpretations (profile_id, prompt_version_id, model_id, content) VALUES (?, ?, ?, ?)',
-            [$profileId, $versionId, $modelId, $content]
+            'INSERT INTO interpretations (profile_id, prompt_version_id, model_id, content, metrics_json, style_version_id)
+             VALUES (?, ?, ?, ?, ?, ?)',
+            [$profileId, $versionId, $modelId, $content,
+             $metrics === null ? null : json_encode(self::mathLayer($metrics), JSON_UNESCAPED_UNICODE),
+             $styleVersionId]
         );
+    }
+
+    /**
+     * СЛОЙ МАТЕМАТИКИ — то, что уходит в модель и в отчёт после правки порогов
+     * оператором. Отдельная функция, а не «весь Metrics::build() как есть»:
+     * снимок должен переживать смену версий кода, поэтому в нём только
+     * настройки, от которых зависит результат, и посчитанная по ним раскладка.
+     *
+     * @return array{conf:array,axes:array,totals:array}
+     */
+    public static function mathLayer(array $m): array {
+        return [
+            'conf' => [
+                'low_pct' => $m['low_pct'] ?? null,
+                'high_pct' => $m['high_pct'] ?? null,
+                'mid_band_frac' => $m['mid_band_frac'] ?? null,
+                'mid_band' => $m['mid_band'] ?? null,
+                'size_contrast' => $m['size_contrast'] ?? null,
+                'phys_scale' => $m['phys_scale'] ?? null,
+            ],
+            'axes' => array_map(static fn ($a) => [
+                'label' => $a['label'], 'score' => $a['score'], 'pct' => $a['pct'],
+                'zna' => $a['zna'], 'sig' => $a['sig'], 'smk' => $a['smk'],
+                'level' => $a['level'], 'phys_state' => $a['phys_state'],
+                'category' => $a['category'], 'zone' => $a['matrix_zone'],
+            ], $m['axes'] ?? []),
+            'totals' => array_map(static fn ($t) => $t['text'], $m['totals'] ?? []),
+        ];
     }
 }

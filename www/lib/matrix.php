@@ -12,14 +12,24 @@
  *   - ось Y — эмоциональный ответ: «Знач.» из таблицы смысло-эмоциональной
  *     значимости Эгоскопа на симметричной шкале ±phys_scale, медиана — по центру.
  *
- * Кружок = показатель. Цвет — по доминирующему параметру СМК: Y (эмоциональный
- * отклик) — красный, X (психическое напряжение) — синий, Z (мышечная реакция) —
- * зелёный. Показатели с низкой выраженностью И без телесного отклика — бледные
- * серые кружки: они в отчёте не разбираются. Размер кружка — вес показателя,
- * то есть выраженность СУММЫ когнитивного и эмоционального ответа
- * (Metrics::weight()). Бледный пунктир — границы, по которым код отсекает
- * средние показатели от высоких (40 % и 60 % шкалы) и телесный отклик от его
- * отсутствия (полоса медианы ±mid_band).
+ * Кружок = показатель. Как он выглядит, решает одна таблица — bubbleStyle():
+ *   - тело откликается выше медианы → кружок разделён на секторы СМК (Y —
+ *     оранжевый, X — синий, Z — зелёный): видно состав реакции. Параметра, не
+ *     названного в столбце СМК, на кружке нет;
+ *   - тело ниже медианы (или у неё), но ответы выше порога → ОДИН цвет,
+ *     преобладающий параметр, без секторальной разбивки;
+ *   - СМК не распознан → фиолетовый: отсутствие данных не должно читаться как
+ *     ещё один нейтральный показатель;
+ *   - ответы ниже порога, а тело откликается → красная обводка: это расхождение
+ *     (левый верхний угол матрицы), а не выраженный показатель;
+ *   - ниже ОБОИХ порогов → бледно-серый: только такие показатели не разбираются
+ *     в отчёте.
+ * Размер кружка — вес показателя (сумма когнитивного и эмоционального ответа,
+ * Metrics::weight()), нормированный по разбросу профиля: настройка оператора
+ * меняет РАЗНИЦУ между кружками, а не их общий размер. Наложившиеся кружки
+ * разводятся в стороны (spread()), чтобы близкие значения не сливались в пятно.
+ * Бледный пунктир — границы, по которым код отсекает средние показатели от
+ * высоких и телесный отклик от его отсутствия (полоса медианы ±mid_band).
  *
  * Всё это считается ДО нейросети: Matrix только рисует то, что посчитал
  * Metrics::build() (Конституция, принцип I).
@@ -36,8 +46,9 @@ final class Matrix {
     private const C_Y = '#e8850c';   // эмоциональный отклик — оранжевый
     private const C_X = '#2f6fd0';   // психическое напряжение — синий
     private const C_Z = '#2e9e5b';   // мышечная реакция — зелёный
-    private const C_NONE = '#7d8a97'; // СМК не распознан — нейтральный серо-синий
-    private const C_FLAT = '#c2ccd4'; // низкая выраженность без отклика — бледный серый
+    private const C_NONE = '#8e44c8'; // СМК не распознан — фиолетовый (заметно, что данных нет)
+    private const C_FLAT = '#c2ccd4'; // ниже обоих порогов — бледный серый
+    private const C_ALERT = '#c0392b'; // обводка расхождения «ответы молчат — тело откликается»
 
     private const GRID = '#eaeef2';
     private const AXIS = '#c9d2da';
@@ -46,13 +57,12 @@ final class Matrix {
     private const TEXT = '#2a3138';
     private const DIM = '#8a949d';
 
-    /**
-     * Радиус кружка: от «еле заметно» до «максимальная сумма ответов». Разброс
-     * шире прежнего (5…17) — заказчик просил, чтобы разница читалась; за
-     * контраст внутри диапазона отвечает мультипликатор (Metrics::sizePower()).
-     */
-    private const R_MIN = 4.0;
-    private const R_MAX = 22.0;
+    /** Радиус кружка: от «еле заметно» до «самый тяжёлый показатель профиля». */
+    private const R_MIN = 5.0;
+    private const R_MAX = 20.0;
+
+    /** Зазор между кружками при разведении наложений (#10). */
+    private const GAP = 1.5;
 
     /** Легенда: параметры СМК как секторы кружка + служебные случаи. */
     private const LEGEND = [
@@ -63,15 +73,28 @@ final class Matrix {
         [self::C_FLAT, 'фон: не разбирается в отчёте'],
     ];
 
-    /** Радиус кружка по весу и мультипликатору контраста. */
-    private static function radius(float $weight, float $power): float {
-        $w = max(0.0, min(1.0, $weight));
-        return self::R_MIN + (self::R_MAX - self::R_MIN) * ($power === 1.0 ? $w : $w ** $power);
+    /**
+     * Радиус кружка. Размер показывает, насколько показатель тяжелее ОСТАЛЬНЫХ
+     * в этом же профиле: вес нормируется по разбросу профиля (wMin…wMax), а
+     * настройка оператора растягивает или сжимает разницу вокруг середины.
+     *
+     * Раньше настройка была показателем степени (вес^POWER) и меняла не разницу,
+     * а сам размер: при контрасте 2 весь профиль становился мелким, потому что
+     * вес меньше единицы в квадрате только убывает. Теперь при контрасте 0 все
+     * кружки одинаковые, при 1 разброс занимает весь диапазон R_MIN…R_MAX, выше
+     * 1 — крайние показатели расходятся ещё сильнее (#2).
+     */
+    private static function radius(float $weight, float $contrast, float $wMin, float $wMax): float {
+        $span = $wMax - $wMin;
+        $t = $span > 1e-9 ? ($weight - $wMin) / $span : 0.5;
+        $t = 0.5 + ($t - 0.5) * $contrast;
+        $t = max(0.0, min(1.0, $t));
+        return self::R_MIN + (self::R_MAX - self::R_MIN) * $t;
     }
 
     /**
      * @param array $metrics результат Metrics::build()
-     * @param array $opts    ['width' => int, 'title' => string, 'compact' => bool]
+     * @param array $opts    ['width' => int, 'title' => string, 'interp' => array]
      */
     public static function svg(array $metrics, array $opts = []): string {
         $axes = $metrics['axes'] ?? [];
@@ -90,44 +113,26 @@ final class Matrix {
         // Пороги и контраст размеров — настройка оператора (Metrics::configure).
         $lowPct = (float) ($metrics['low_pct'] ?? Metrics::LOW_PCT);
         $highPct = (float) ($metrics['high_pct'] ?? Metrics::HIGH_PCT);
-        $power = (float) ($metrics['size_power'] ?? Metrics::SIZE_POWER);
-        // Компактный режим — для PDF: диаграмма и матрица должны уместиться на
-        // один лист, поэтому пояснения сжаты до сути (#7).
-        $compact = !empty($opts['compact']);
-
-        // Пояснения под матрицей переносим по ширине заранее: от числа строк
-        // зависит высота картинки (иначе текст уезжал за край SVG).
-        if ($compact) {
-            $notes = ['Размер кружка — суммарная выраженность; секторы X / Y / Z — преобладающий параметр; серые кружки в отчёте не разбираются.'];
-            $notes[] = 'Пунктир — границы уровней (' . Metrics::num($lowPct) . ' % и ' . Metrics::num($highPct) . ' %)'
-                     . ($hasPhys ? ' и полоса медианы (±' . Metrics::num($midBand) . '); жирная обводка — достоверное отклонение (p<0.05).' : '.');
-        } else {
-            $notes = ['Размер кружка — выраженность суммы когнитивного и эмоционального ответа.'];
-            $notes[] = 'Кружок разделён на секторы X (синий), Y (оранжевый), Z (зелёный): больший сектор — преобладающий параметр СМК; серый — фоновые показатели, в отчёте не разбираются.';
-            $notes[] = 'Бледный пунктир — границы, по которым показатели делятся на низкие / средние / высокие ('
-                     . Metrics::num($lowPct) . ' % и ' . Metrics::num($highPct) . ' % от максимума шкалы)'
-                     . ($hasPhys ? ' и полоса медианы (±' . Metrics::num($midBand) . ').' : '.');
-            $notes[] = $hasPhys
-                ? 'Жирная обводка и жирная подпись — достоверное отклонение (p<0.05); пунктирная обводка — физиология по этой шкале не распознана.'
-                : 'Физиология не распознана: показатели отложены только по когнитивной оси.';
-        }
+        $contrast = (float) ($metrics['size_contrast'] ?? Metrics::SIZE_CONTRAST);
+        $wMin = (float) ($metrics['weight_min'] ?? 0.0);
+        $wMax = (float) ($metrics['weight_max'] ?? 1.0);
 
         $padL = 62; $padR = 26; $padT = 46;
         $plotW = $W - $padL - $padR;
         // Без физиологии вертикальной оси нет — незачем оставлять пустое поле.
         $plotH = (int) round($plotW * ($hasPhys ? 0.62 : 0.28));
-        $noteLines = [];
-        foreach ($notes as $note) {
-            foreach (self::wrap($note, (int) floor($plotW / 4.9)) as $ln) $noteLines[] = $ln;
-        }
-        // Легенда: цвет = доминирующий параметр, размер = сумма ответов; последним
-        // пунктом — жирная обводка достоверного отклонения (#5). Раскладку считаем
-        // ЗДЕСЬ, до высоты картинки: раньше число строк оценивалось грубой формулой
-        // и в узкой (PDF) матрице внизу оставалось до трёх пустых строк.
+        // Пояснений под матрицей больше нет: расшифровки цветов, пунктира и
+        // обводки заказчик просил убрать — всё, что нужно, читается по легенде
+        // (#4). Освободившееся место отдано самой картинке.
         $legend = self::LEGEND;
-        if ($hasPhys) $legend[] = [null, 'достоверно (p<0.05)'];
+        if ($hasPhys) {
+            $legend[] = [null, 'достоверно (p<0.05)'];
+            $legend[] = ['alert', 'ниже порога по тесту, но тело откликается'];
+        }
+        // Раскладку легенды считаем ЗДЕСЬ, до высоты картинки: раньше число строк
+        // оценивалось грубой формулой и внизу оставались пустые строки.
         $legendRows = self::legendRows($legend, $padL, $W - $padR);
-        $padB = 34 + $legendRows * 15 + count($noteLines) * 12 + 8;
+        $padB = 34 + $legendRows * 15 + 8;
         $H = $padT + $plotH + $padB;
 
         // Когниция: 0…100 % слева направо. Физиология: +phys_scale сверху,
@@ -145,11 +150,12 @@ final class Matrix {
              . ' data-padl="' . $padL . '" data-padt="' . $padT . '" data-plotw="' . $plotW . '" data-ploth="' . $plotH . '"'
              . ' data-phys-scale="' . Metrics::num($physScale) . '" data-has-phys="' . ($hasPhys ? '1' : '0') . '"'
              . ' data-low="' . Metrics::num($lowPct) . '" data-high="' . Metrics::num($highPct) . '"'
-             . ' data-mid-band="' . Metrics::num($midBand) . '" data-power="' . Metrics::num($power) . '"'
+             . ' data-mid-band="' . Metrics::num($midBand) . '" data-contrast="' . Metrics::num($contrast) . '"'
+             . ' data-wmin="' . self::num3($wMin) . '" data-wmax="' . self::num3($wMax) . '"'
              // Полосу медианы отдаём долей, а не готовым числом: обратный пересчёт
              // из округлённого «±0.8» дал бы не ту границу, по которой считал сервер.
              . ' data-band-pct="' . Metrics::num((float) ($metrics['mid_band_frac'] ?? Metrics::MID_BAND_FRAC) * 100.0) . '"'
-             . ' data-rmin="' . self::R_MIN . '" data-rmax="' . self::R_MAX . '">';
+             . ' data-rmin="' . self::R_MIN . '" data-rmax="' . self::R_MAX . '" data-gap="' . self::GAP . '">';
         $s[] = '<rect width="100%" height="100%" fill="#ffffff"/>';
         $s[] = '<text x="' . round($W / 2) . '" y="24" text-anchor="middle" font-size="14" font-weight="bold" fill="' . self::TEXT . '">'
              . self::esc($title) . '</text>';
@@ -233,25 +239,31 @@ final class Matrix {
         foreach ($axes as $a) {
             $px = $x((float) $a['cog_pct']);
             $py = $hasPhys && $a['phys_pct'] !== null ? $y((float) $a['phys_pct']) : $padT + $plotH / 2.0;
-            $r = self::radius((float) $a['weight'], $power);
-            $points[] = ['a' => $a, 'x' => $px, 'y' => $py, 'r' => $r, 'nodata' => $hasPhys && $a['phys_pct'] === null];
+            $r = self::radius((float) $a['weight'], $contrast, $wMin, $wMax);
+            $points[] = ['a' => $a, 'x0' => $px, 'y0' => $py, 'x' => $px, 'y' => $py, 'r' => $r,
+                         'nodata' => $hasPhys && $a['phys_pct'] === null];
         }
         // Крупные кружки рисуем первыми, чтобы мелкие не пропадали под ними, а
         // подписи получали место в порядке значимости показателя.
         usort($points, static fn ($p, $q) => (float) $q['a']['weight'] <=> (float) $p['a']['weight']);
+        // Близкие значения дают наложение кружков вплоть до полного перекрытия
+        // (заказчик прислал такую матрицу: пять мотивов в одной точке). Разводим
+        // их в стороны — показатель остаётся на своём месте с точностью до
+        // сдвига, но виден каждый (#10).
+        $points = self::spread($points, $padL, $padL + $plotW, $padT, $padT + $plotH);
 
         $bubbles = array_map(static fn ($p) => [$p['x'] - $p['r'], $p['y'] - $p['r'], $p['x'] + $p['r'], $p['y'] + $p['r']], $points);
         foreach ($points as $p) {
             $a = $p['a'];
-            $isFlat = self::isPale($a);         // фон: в отчёте не разбирается (#7)
+            $st = self::bubbleStyle($a);
             $isSig = !empty($a['sig']);
             $cx = round($p['x'], 1); $cy = round($p['y'], 1); $r = round($p['r'], 1);
-            $sectors = $isFlat ? [] : self::sectorPaths((string) $a['smk']);
-            // Достоверное отклонение читается сразу: тёмная жирная обводка (#5).
-            $sw = $isSig ? '2.6' : '1.2';
+            // Секторы печатаем ВСЕГДА, когда СМК распознан, даже если сейчас
+            // кружок серый или одноцветный. Раньше у фоновых показателей секторов
+            // в разметке не было совсем, и опущенный порог не мог их вернуть:
+            // кружок так и оставался серым (#8).
+            $sectors = self::sectorPaths((string) $a['smk']);
             $dash = $p['nodata'] ? ' stroke-dasharray="3 3"' : '';
-            $plain = $isFlat ? self::C_FLAT : self::C_NONE;
-            $ring = $isSig ? '#2a3138' : ($sectors ? '#ffffff' : $plain);
             // Атрибуты для интерактивного слоя: математика всегда, интерпретация —
             // если она сопоставлена (interactiveHtml её подставит).
             $detail = self::esc(self::detailText($a));
@@ -259,39 +271,46 @@ final class Matrix {
                 ? ' data-interp="' . self::esc((string) $interp[$a['label']]) . '"' : '';
             $s[] = '<g class="mx-bubble" data-n="' . (int) $a['n'] . '" data-label="' . self::esc((string) $a['label'])
                  . '" data-detail="' . $detail . '"' . $interpAttr
+                 // Истинные координаты (x0/y0) храним отдельно от текущих: при
+                 // смене контраста интерактивный слой разводит кружки заново от
+                 // них, иначе сдвиги накапливались бы с каждой правкой.
+                 . ' data-x0="' . round($p['x0'], 1) . '" data-y0="' . round($p['y0'], 1) . '"'
+                 . ' data-cx="' . $cx . '" data-cy="' . $cy . '" data-r="' . $r
                  // Вес — с полной точностью: Metrics::num() округлил бы до
                  // десятых, и кружки в интерактиве получались бы не того размера,
                  // что на статичной картинке в PDF.
-                 . ' data-cx="' . $cx . '" data-cy="' . $cy . '" data-r="' . $r
-                 . '" data-weight="' . rtrim(rtrim(number_format((float) $a['weight'], 3, '.', ''), '0'), '.')
+                 . '" data-weight="' . self::num3((float) $a['weight'])
                  . '" data-cog="' . Metrics::num((float) $a['cog_pct']) . '" data-zna="' . ($a['zna'] === null ? '' : Metrics::num((float) $a['zna']))
-                 . '" data-sig="' . ($isSig ? '1' : '0') . '" data-pale="' . ($isFlat ? '1' : '0') . '">';
+                 . '" data-sig="' . ($isSig ? '1' : '0') . '" data-dom="' . self::dominantColor($a)
+                 . '" data-pale="' . ($st['mode'] === 'flat' ? '1' : '0') . '">';
             $s[] = '<title>' . $detail . '</title>';
             $s[] = '<g class="mx-shape" transform="translate(' . $cx . ' ' . $cy . ') scale(' . $r . ')">';
-            // Сплошной кружок — фон или нераспознанный СМК; секторы — когда СМК есть.
-            $s[] = '<circle class="mx-plain" cx="0" cy="0" r="1" fill="' . $plain . '" fill-opacity="'
-                 . ($isFlat ? '0.5' : '0.72') . '"' . ($sectors ? ' display="none"' : '') . '/>';
+            // Сплошной кружок — фон, одноцветный показатель (ниже медианы) или
+            // нераспознанный СМК; секторы — когда тело откликается выше медианы.
+            $s[] = '<circle class="mx-plain" cx="0" cy="0" r="1" fill="' . $st['color'] . '" fill-opacity="'
+                 . $st['opacity'] . '"' . ($st['mode'] === 'sectors' ? ' display="none"' : '') . '/>';
             if ($sectors) {
-                // Кружок разделён на секторы X / Y / Z: больший сектор — преобладающий
-                // параметр СМК. Порядок и веса берём из столбца СМК.
-                $s[] = '<g class="mx-sectors">';
+                // Кружок разделён на секторы X / Y / Z: больший сектор —
+                // преобладающий параметр СМК. Параметров, которых в токене нет,
+                // на кружке нет тоже (#11).
+                $s[] = '<g class="mx-sectors"' . ($st['mode'] === 'sectors' ? '' : ' display="none"') . '>';
                 foreach ($sectors as [$path, $col]) {
                     $s[] = '<path d="' . $path . '" fill="' . $col . '" fill-opacity="0.82" stroke="#ffffff"'
                          . ' stroke-width="0.6" vector-effect="non-scaling-stroke"/>';
                 }
                 $s[] = '</g>';
             }
-            $s[] = '<circle class="mx-ring" cx="0" cy="0" r="1" fill="none" stroke="' . $ring . '" stroke-width="' . $sw
+            $s[] = '<circle class="mx-ring" cx="0" cy="0" r="1" fill="none" stroke="' . $st['ring'] . '" stroke-width="' . $st['width']
                  . '" vector-effect="non-scaling-stroke"' . $dash . '/>';
             $s[] = '</g>';
             // Номер шкалы: внутри кружка, если он достаточно велик, иначе рядом.
-            // Рисуем оба варианта и показываем нужный — при смене мультипликатора
+            // Рисуем оба варианта и показываем нужный — при смене контраста
             // интерактивный слой просто переключает их видимостью.
             $s[] = '<text class="mx-num-in" x="' . $cx . '" y="' . round($p['y'] + 3.4, 1) . '" text-anchor="middle" font-size="9.5"'
-                 . ' font-weight="bold" fill="' . ($isFlat ? self::TEXT : '#ffffff') . '"'
+                 . ' font-weight="bold" fill="' . ($st['mode'] === 'flat' ? self::TEXT : '#ffffff') . '"'
                  . ' pointer-events="none"' . ($r >= 8.5 ? '' : ' display="none"') . '>' . (int) $a['n'] . '</text>';
             $s[] = '<text class="mx-num-out" x="' . round($p['x'] - $p['r'] - 2, 1) . '" y="' . round($p['y'] - $p['r'] - 1, 1)
-                 . '" text-anchor="end" font-size="8" font-weight="bold" fill="' . self::color($a) . '" pointer-events="none"'
+                 . '" text-anchor="end" font-size="8" font-weight="bold" fill="' . $st['color'] . '" pointer-events="none"'
                  . ($r >= 8.5 ? ' display="none"' : '') . '>' . (int) $a['n'] . '</text>';
             $s[] = '</g>';
         }
@@ -313,8 +332,8 @@ final class Matrix {
                 if ($box === null) continue;
                 [$tx, $ty, $anchor, $rect] = $box;
                 $labels[] = $rect;
-                $s[] = '<text class="mx-name" data-n="' . (int) $a['n'] . '" data-cx="' . round($p['x'], 1) . '" data-r="'
-                     . round($p['r'], 1) . '" data-side="' . $anchor . '" x="' . round($tx, 1) . '" y="' . round($ty + 3.2, 1)
+                $s[] = '<text class="mx-name" data-n="' . (int) $a['n'] . '" data-dy="' . round($ty - $p['y'], 1)
+                     . '" data-side="' . $anchor . '" x="' . round($tx, 1) . '" y="' . round($ty + 3.2, 1)
                      . '" text-anchor="' . $anchor . '" font-size="9"' . (!empty($a['sig']) ? ' font-weight="bold"' : '')
                      . ' fill="' . self::TEXT . '" pointer-events="none"' . ($isFlat ? ' display="none"' : '') . '>'
                      . self::esc($text) . '</text>';
@@ -327,15 +346,16 @@ final class Matrix {
         foreach ($legend as $k => [$c, $label]) {
             $width = self::legendWidth($label);
             if ($k > 0 && $lx + $width > $W - $padR) { $lx = $padL; $ly += 15; }
-            $s[] = $c === null
-                ? '<circle cx="' . ($lx + 5) . '" cy="' . ($ly - 3) . '" r="4.5" fill="#ffffff" stroke="#2a3138" stroke-width="2.6"/>'
-                : '<circle cx="' . ($lx + 5) . '" cy="' . ($ly - 3) . '" r="5" fill="' . $c . '" fill-opacity="0.72" stroke="' . $c . '"/>';
+            $s[] = match ($c) {
+                // Достоверность и расхождение — это обводка, а не заливка: в
+                // легенде они показаны пустым кружком с той же обводкой.
+                null    => '<circle cx="' . ($lx + 5) . '" cy="' . ($ly - 3) . '" r="4.5" fill="#ffffff" stroke="#2a3138" stroke-width="2.6"/>',
+                'alert' => '<circle cx="' . ($lx + 5) . '" cy="' . ($ly - 3) . '" r="4.5" fill="#ffffff" stroke="' . self::C_ALERT . '" stroke-width="2.4"/>',
+                default => '<circle cx="' . ($lx + 5) . '" cy="' . ($ly - 3) . '" r="5" fill="' . $c . '" fill-opacity="0.72" stroke="' . $c . '"/>',
+            };
             $s[] = '<text x="' . ($lx + 14) . '" y="' . $ly . '" font-size="9.5"' . ($c === null ? ' font-weight="bold"' : '')
                  . ' fill="' . self::TEXT . '">' . self::esc($label) . '</text>';
             $lx += $width + 10;
-        }
-        foreach ($noteLines as $k => $line) {
-            $s[] = '<text x="' . $padL . '" y="' . ($ly + 18 + $k * 12) . '" font-size="9" fill="' . self::DIM . '">' . self::esc($line) . '</text>';
         }
 
         $s[] = '</svg>';
@@ -397,7 +417,8 @@ final class Matrix {
   <?php if ($hasPhys): ?>
     <label>Полоса медианы, % шкалы<input type="number" class="mx-f" data-k="band" min="0" max="50" step="0.5" value="<?= $n((float)($metrics['mid_band_frac'] ?? Metrics::MID_BAND_FRAC) * 100.0) ?>"></label>
   <?php endif; ?>
-  <label>Мультипликатор размера<input type="number" class="mx-f" data-k="power" min="0.2" max="6" step="0.1" value="<?= $n((float)($metrics['size_power'] ?? Metrics::SIZE_POWER)) ?>"></label>
+  <label title="0 — все кружки одного размера; 1 — естественный разброс; больше — разница подчёркнута">Контраст размеров<input
+      type="number" class="mx-f" data-k="power" min="0" max="6" step="0.1" value="<?= $n((float)($metrics['size_contrast'] ?? Metrics::SIZE_CONTRAST)) ?>"></label>
   <span class="mx-state muted">Пунктир можно тащить мышью — значения сохраняются.</span>
 </div>
 <style>
@@ -456,11 +477,11 @@ final class Matrix {
   var D=svg.dataset,
       padL=+D.padl, padT=+D.padt, plotW=+D.plotw, plotH=+D.ploth,
       physScale=+D.physScale||0, hasPhys=D.hasPhys==='1',
-      RMIN=+D.rmin, RMAX=+D.rmax,
-      C_FLAT='<?= self::C_FLAT ?>', C_NONE='<?= self::C_NONE ?>', C_TEXT='<?= self::TEXT ?>',
+      RMIN=+D.rmin, RMAX=+D.rmax, GAP=+D.gap, WMIN=+D.wmin, WMAX=+D.wmax,
+      C_FLAT='<?= self::C_FLAT ?>', C_TEXT='<?= self::TEXT ?>', C_ALERT='<?= self::C_ALERT ?>',
       MID_BAND_MIN=<?= Metrics::MID_BAND_MIN ?>,
       saveUrl=<?= json_encode($saveUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
-  var st={low:+D.low, high:+D.high, band:+D.bandPct, power:+D.power};
+  var st={low:+D.low, high:+D.high, band:+D.bandPct, power:+D.contrast};
   var ctl=document.getElementById('<?= $wid ?>-ctl');
   if(!ctl) return;
   var state=ctl.querySelector('.mx-state'),
@@ -476,45 +497,108 @@ final class Matrix {
     if(Math.abs(zna)<=band()) return 'median';
     return zna>0 ? 'above' : 'below';
   }
-  function isSkip(lvl, ps, sig){
-    if(ps==='above'&&sig) return false;
-    if(ps==='below') return !(lvl==='high' || (sig&&lvl==='mid'));
-    return lvl==='low';
+  /* Зеркало Metrics::zone() и Metrics::category(): из отчёта выпадают только те
+     показатели, что ниже ОБОИХ порогов оператора — и по ответам теста, и по
+     полосе медианы. */
+  function zone(lvl, ps){
+    if(ps===null) return 'unknown';
+    if(ps==='above') return lvl==='high' ? 'both' : (lvl==='mid' ? 'body' : 'against');
+    return lvl==='high' ? 'mind' : (lvl==='mid' ? 'middle' : 'flat');
   }
-  function radius(w){ return RMIN+(RMAX-RMIN)*Math.pow(Math.max(0,Math.min(1,w)), st.power); }
+  function isSkip(lvl, ps){
+    if(ps===null) return lvl==='low';
+    return ps==='below' && lvl==='low';
+  }
+  function radius(w){
+    var span=WMAX-WMIN, t=span>1e-9 ? (w-WMIN)/span : 0.5;
+    t=0.5+(t-0.5)*st.power;
+    return RMIN+(RMAX-RMIN)*Math.max(0,Math.min(1,t));
+  }
 
   var names={};
   svg.querySelectorAll('.mx-name').forEach(function(t){ names[t.dataset.n]=t; });
+  var bubbles=[].slice.call(svg.querySelectorAll('.mx-bubble'));
+
+  /* Разведение наложений — зеркало Matrix::spread(). Стартуем всегда от истинных
+     координат (x0/y0), чтобы сдвиги не накапливались от правки к правке. */
+  function spread(pts){
+    var n=pts.length, i, j, k;
+    if(n<2) return pts;
+    for(k=0;k<60;k++){
+      var moved=false;
+      for(i=0;i<n;i++) for(j=i+1;j<n;j++){
+        var dx=pts[j].x-pts[i].x, dy=pts[j].y-pts[i].y, need=pts[i].r+pts[j].r+GAP;
+        if(Math.sqrt(dx*dx+dy*dy)>=need) continue;
+        // Направление — по истинным координатам, чтобы кружки не менялись
+        // местами (зеркало Matrix::spread()).
+        var dx0=pts[j].x0-pts[i].x0, dy0=pts[j].y0-pts[i].y0,
+            d0=Math.sqrt(dx0*dx0+dy0*dy0);
+        if(d0<0.01){ var ang=2*Math.PI*i/n; dx0=Math.cos(ang); dy0=Math.sin(ang); d0=1; }
+        var ux=dx0/d0, uy=dy0/d0, push=(need-(dx*ux+dy*uy))/2*0.6;
+        if(push<=0) continue;
+        pts[i].x-=ux*push; pts[i].y-=uy*push;
+        pts[j].x+=ux*push; pts[j].y+=uy*push;
+        moved=true;
+      }
+      for(i=0;i<n;i++){
+        pts[i].x+=(pts[i].x0-pts[i].x)*0.05;
+        pts[i].y+=(pts[i].y0-pts[i].y)*0.05;
+        pts[i].x=Math.max(padL+pts[i].r, Math.min(padL+plotW-pts[i].r, pts[i].x));
+        pts[i].y=Math.max(padT+pts[i].r, Math.min(padT+plotH-pts[i].r, pts[i].y));
+      }
+      if(!moved) break;
+    }
+    return pts;
+  }
 
   function paint(){
-    svg.querySelectorAll('.mx-bubble').forEach(function(g){
-      var zna=g.dataset.zna===''?null:+g.dataset.zna,
+    var pts=bubbles.map(function(g){
+      return {g:g, x0:+g.dataset.x0, y0:+g.dataset.y0, x:+g.dataset.x0, y:+g.dataset.y0,
+              w:+g.dataset.weight, r:radius(+g.dataset.weight)};
+    });
+    // Тяжёлые первыми — тот же порядок расталкивания, что и на сервере (по весу,
+    // а не по радиусу: при контрасте 0 радиусы равны и порядок был бы случайным).
+    pts.sort(function(a,b){ return b.w-a.w; });
+    spread(pts);
+    pts.forEach(function(p){
+      var g=p.g,
+          zna=g.dataset.zna===''?null:+g.dataset.zna,
           sig=g.dataset.sig==='1',
-          pale=isSkip(level(+g.dataset.cog), physState(zna), sig),
-          r=radius(+g.dataset.weight),
-          cx=+g.dataset.cx, cy=+g.dataset.cy,
+          lvl=level(+g.dataset.cog), ps=physState(zna),
+          pale=isSkip(lvl, ps), zn=zone(lvl, ps),
+          dom=g.dataset.dom || C_FLAT,
+          r=p.r, cx=p.x, cy=p.y,
           sect=g.querySelector('.mx-sectors'),
           plain=g.querySelector('.mx-plain'),
           ring=g.querySelector('.mx-ring'),
           inN=g.querySelector('.mx-num-in'),
-          outN=g.querySelector('.mx-num-out');
+          outN=g.querySelector('.mx-num-out'),
+          // Секторы — только там, где тело откликается выше медианы; ниже
+          // медианы кружок одноцветный, преобладающим параметром.
+          sectors=!pale && !!sect && (zn==='both'||zn==='body'||zn==='against'),
+          fill=pale?C_FLAT:dom;
       g.dataset.pale=pale?'1':'0';
-      g.querySelector('.mx-shape').setAttribute('transform','translate('+cx+' '+cy+') scale('+num(r)+')');
-      if(sect) sect.setAttribute('display', pale?'none':'inline');
-      plain.setAttribute('display', (pale||!sect)?'inline':'none');
-      plain.setAttribute('fill', pale?C_FLAT:C_NONE);
+      g.dataset.cx=num(cx); g.dataset.cy=num(cy); g.dataset.r=num(r);
+      g.querySelector('.mx-shape').setAttribute('transform','translate('+num(cx)+' '+num(cy)+') scale('+num(r)+')');
+      if(sect) sect.setAttribute('display', sectors?'inline':'none');
+      plain.setAttribute('display', sectors?'none':'inline');
+      plain.setAttribute('fill', fill);
       plain.setAttribute('fill-opacity', pale?'0.5':'0.72');
-      ring.setAttribute('stroke', sig ? '#2a3138' : (!pale&&sect ? '#ffffff' : (pale?C_FLAT:C_NONE)));
+      ring.setAttribute('stroke', zn==='against' ? C_ALERT : (sig ? '#2a3138' : (sectors ? '#ffffff' : fill)));
+      ring.setAttribute('stroke-width', sig ? '2.6' : (zn==='against' ? '2.2' : '1.2'));
       inN.setAttribute('display', r>=8.5?'inline':'none');
       inN.setAttribute('fill', pale?C_TEXT:'#ffffff');
-      inN.setAttribute('y', num(cy+3.4));
+      inN.setAttribute('x', num(cx)); inN.setAttribute('y', num(cy+3.4));
       outN.setAttribute('display', r>=8.5?'none':'inline');
       outN.setAttribute('x', num(cx-r-2)); outN.setAttribute('y', num(cy-r-1));
-      outN.setAttribute('fill', pale?C_FLAT:C_NONE);
+      outN.setAttribute('fill', fill);
       var nm=names[g.dataset.n];
       if(nm){
+        // Подпись едет вместе со своим кружком: место ей подобрал сервер, но
+        // после расталкивания и смены контраста кружок стоит в другой точке.
         nm.setAttribute('display', pale?'none':'inline');
         nm.setAttribute('x', num(nm.dataset.side==='start' ? cx+r+4 : cx-r-4));
+        nm.setAttribute('y', num(cy+(+nm.dataset.dy||0)+3.2));
       }
     });
   }
@@ -667,8 +751,9 @@ final class Matrix {
     }
 
     /**
-     * Порядок параметров СМК: «Z*>X>Y» → ['Z','X','Y']. Недостающие до трёх
-     * буквы дописываются в конец (наименьший вес). Пустой токен → [].
+     * Порядок параметров СМК: «Z*>X>Y» → ['Z','X','Y']. Буквы, которых в токене
+     * НЕТ, не дописываются: если параметр в выгрузке не назван, его цвета на
+     * кружке быть не должно (#11). Пустой токен → [].
      */
     private static function smkOrder(string $smk): array {
         $norm = str_replace(['Х', 'х', 'У', 'у', 'Ζ', 'x', 'y', 'z'], ['X', 'X', 'Y', 'Y', 'Z', 'X', 'Y', 'Z'], $smk);
@@ -676,32 +761,46 @@ final class Matrix {
         foreach (preg_split('//u', $norm, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $ch) {
             if (in_array($ch, ['X', 'Y', 'Z'], true) && !in_array($ch, $order, true)) $order[] = $ch;
         }
-        if ($order === []) return [];
-        foreach (['X', 'Y', 'Z'] as $ch) if (!in_array($ch, $order, true)) $order[] = $ch;
         return $order;
     }
 
     /**
+     * Доли секторов по числу названных параметров. Первый параметр всегда самый
+     * крупный; если параметр один — кружок целиком его цвета.
+     */
+    private const SECTOR_WEIGHTS = [
+        1 => [1.0],
+        2 => [0.62, 0.38],
+        3 => [0.5, 0.33, 0.17],
+    ];
+
+    /**
      * Секторы кружка по порядку СМК: первый параметр — самый большой сектор.
-     * Веса по рангу (0.5 / 0.33 / 0.17) наглядно показывают преобладание, при
-     * этом кружок честно разделён на X/Y/Z. Возвращает пары [path, color].
+     * Доли по рангу наглядно показывают преобладание, при этом кружок честно
+     * разделён между НАЗВАННЫМИ параметрами. Возвращает пары [path, color].
      *
      * Путь строится в ЕДИНИЧНОМ круге с центром в начале координат: на место его
      * ставит transform="translate(cx cy) scale(r)" у группы кружка, поэтому смена
-     * мультипликатора размеров не требует пересчёта секторов.
+     * контраста размеров не требует пересчёта секторов.
      *
      * @return array<int, array{0:string,1:string}>
      */
     private static function sectorPaths(string $smk): array {
         $order = self::smkOrder($smk);
         if ($order === []) return [];
-        $weights = [0.5, 0.33, 0.17];
+        $weights = self::SECTOR_WEIGHTS[count($order)] ?? self::SECTOR_WEIGHTS[3];
         $colors = ['X' => self::C_X, 'Y' => self::C_Y, 'Z' => self::C_Z];
         $out = [];
         $a0 = -M_PI / 2;            // старт сверху
         foreach ($order as $k => $letter) {
             $frac = $weights[$k] ?? 0.0;
             if ($frac <= 0) continue;
+            // Один параметр — целый круг: дуга в 360° через SVG-arc не рисуется
+            // (начало совпадает с концом), поэтому это просто circle.
+            if ($frac >= 0.999) {
+                $out[] = ['M 0 -1 A 1 1 0 1 1 0 1 A 1 1 0 1 1 0 -1 Z', $colors[$letter] ?? self::C_NONE];
+                break;
+            }
             $a1 = $a0 + 2 * M_PI * $frac;
             $x0 = cos($a0); $y0 = sin($a0);
             $x1 = cos($a1); $y1 = sin($a1);
@@ -716,6 +815,106 @@ final class Matrix {
     }
 
     /**
+     * Как выглядит кружок — одна таблица на всю матрицу (её зеркалит JS в
+     * interactiveHtml, ровно как таблицу категорий Metrics):
+     *
+     *  - ниже обоих порогов («skip») — бледно-серый, в отчёте не разбирается;
+     *  - тело откликается выше медианы — секторы СМК: видно состав реакции;
+     *  - тело ниже медианы (или у медианы), но ответы выше порога — ОДИН цвет,
+     *    преобладающий параметр, без секторальной разбивки (#6);
+     *  - СМК не распознан — фиолетовый, чтобы отсутствие данных не читалось как
+     *    ещё один нейтральный показатель (#7);
+     *  - ответы ниже порога, а тело откликается — красная обводка: это
+     *    расхождение, левый верхний угол матрицы (#9).
+     *
+     * @return array{mode:string,color:string,opacity:string,ring:string,width:string}
+     */
+    private static function bubbleStyle(array $a): array {
+        $zone = (string) ($a['matrix_zone'] ?? '');
+        $sig = !empty($a['sig']);
+        if (self::isPale($a)) {
+            return ['mode' => 'flat', 'color' => self::C_FLAT, 'opacity' => '0.5',
+                    'ring' => self::C_FLAT, 'width' => '1.2'];
+        }
+        $dominant = self::dominantColor($a);
+        $hasSectors = self::smkOrder((string) ($a['smk'] ?? '')) !== [];
+        // Секторы — только там, где тело откликается выше медианы: состав реакции
+        // осмыслен, когда реакция есть.
+        $sectors = $hasSectors && in_array($zone, ['both', 'body', 'against'], true);
+        $ring = match (true) {
+            $zone === 'against' => self::C_ALERT,
+            $sig                => '#2a3138',
+            $sectors            => '#ffffff',
+            default             => $dominant,
+        };
+        return [
+            'mode' => $sectors ? 'sectors' : 'solid',
+            'color' => $dominant,
+            'opacity' => '0.72',
+            'ring' => $ring,
+            'width' => $sig ? '2.6' : ($zone === 'against' ? '2.2' : '1.2'),
+        ];
+    }
+
+    /**
+     * Разводит наложившиеся кружки (#10). Значения показателей бывают очень
+     * близкими — на присланной заказчиком матрице пять мотивов сливались в одно
+     * пятно, и прочитать оттуда было нечего. Кружки расталкиваются попарно и
+     * пружиной тянутся обратно к своей истинной точке, поэтому смещение
+     * минимально: показатель остаётся «там же», но виден отдельно.
+     *
+     * @param array $points [['x'=>float,'y'=>float,'r'=>float,…], …]
+     */
+    private static function spread(array $points, float $minX, float $maxX, float $minY, float $maxY): array {
+        $n = count($points);
+        if ($n < 2) return $points;
+        for ($iter = 0; $iter < 60; $iter++) {
+            $moved = false;
+            for ($i = 0; $i < $n; $i++) {
+                for ($j = $i + 1; $j < $n; $j++) {
+                    $need = $points[$i]['r'] + $points[$j]['r'] + self::GAP;
+                    $dx = $points[$j]['x'] - $points[$i]['x'];
+                    $dy = $points[$j]['y'] - $points[$i]['y'];
+                    if (sqrt($dx * $dx + $dy * $dy) >= $need) continue;
+                    // Направление расталкивания берём по ИСТИННЫМ координатам, а
+                    // не по текущим: иначе пара могла перескочить друг через
+                    // друга, и показатель со «Знач.» −5 оказывался НИЖЕ соседа
+                    // со «Знач.» −7 — картинка врала о порядке.
+                    $dx0 = $points[$j]['x0'] - $points[$i]['x0'];
+                    $dy0 = $points[$j]['y0'] - $points[$i]['y0'];
+                    $d0 = sqrt($dx0 * $dx0 + $dy0 * $dy0);
+                    if ($d0 < 0.01) {  // точное совпадение — расталкиваем по кругу
+                        $ang = 2 * M_PI * $i / max(1, $n);
+                        $dx0 = cos($ang); $dy0 = sin($ang); $d0 = 1.0;
+                    }
+                    $ux = $dx0 / $d0; $uy = $dy0 / $d0;
+                    // Сколько не хватает ВДОЛЬ этого направления.
+                    $proj = $dx * $ux + $dy * $uy;
+                    $push = ($need - $proj) / 2 * 0.6;
+                    if ($push <= 0) continue;
+                    $points[$i]['x'] -= $ux * $push; $points[$i]['y'] -= $uy * $push;
+                    $points[$j]['x'] += $ux * $push; $points[$j]['y'] += $uy * $push;
+                    $moved = true;
+                }
+            }
+            // Пружина к истинной точке + удержание внутри поля.
+            foreach ($points as $k => $p) {
+                $points[$k]['x'] += ($p['x0'] - $p['x']) * 0.05;
+                $points[$k]['y'] += ($p['y0'] - $p['y']) * 0.05;
+                $points[$k]['x'] = max($minX + $p['r'], min($maxX - $p['r'], $points[$k]['x']));
+                $points[$k]['y'] = max($minY + $p['r'], min($maxY - $p['r'], $points[$k]['y']));
+            }
+            if (!$moved) break;
+        }
+        return $points;
+    }
+
+    /** Число с тремя знаками после запятой без хвостовых нулей (вес показателя). */
+    private static function num3(float $v): string {
+        return rtrim(rtrim(number_format($v, 3, '.', ''), '0'), '.') ?: '0';
+    }
+
+    /**
      * Бледный (серый) кружок — показатель, который в отчёте НЕ упоминается: ровно
      * та же категория «skip», что и в тексте интерпретации (Interpret и Metrics).
      * Так серые кружки на матрице совпадают со шкалами, о которых отчёт молчит
@@ -725,15 +924,25 @@ final class Matrix {
         return (string) ($axis['category'] ?? '') === 'skip';
     }
 
-    /** Цвет кружка: бледно-серый для фоновых, иначе — по доминирующему параметру. */
-    private static function color(array $axis): string {
-        if (self::isPale($axis)) return self::C_FLAT;
+    /**
+     * Цвет по доминирующему параметру СМК — БЕЗ оглядки на то, разбирается ли
+     * показатель в отчёте. Именно он уходит в разметку (data-dom): опущенный
+     * порог возвращает серому кружку цвет, а взять его больше неоткуда. Раньше
+     * в атрибут писался итоговый цвет стиля, то есть у фоновых — серый, и
+     * кружок, ставший рабочим, оставался серым навсегда (#8).
+     */
+    private static function dominantColor(array $axis): string {
         return match ((string) ($axis['dominant'] ?? '')) {
             'Y' => self::C_Y,
             'X' => self::C_X,
             'Z' => self::C_Z,
             default => self::C_NONE,
         };
+    }
+
+    /** Цвет кружка сейчас: бледно-серый для фоновых, иначе — по СМК. */
+    private static function color(array $axis): string {
+        return self::isPale($axis) ? self::C_FLAT : self::dominantColor($axis);
     }
 
     /**
