@@ -293,15 +293,21 @@ final class Phys {
     }
 
     /**
-     * Ручная правка оператором: «Знач.» по осям + флажки достоверности. Раньше
-     * возвращался только aligned, из-за чего правка одного значения обнуляла
-     * распознанные p / СМК по всем осям.
+     * Ручная правка оператором: «Знач.» по осям + флажки достоверности + столбец
+     * СМК. Раньше возвращался только aligned, из-за чего правка одного значения
+     * обнуляла распознанные p / СМК по всем осям.
+     *
+     * СМК правится руками, потому что распознавание его теряет чаще всего: у
+     * строк с p>0.05 столбец на скриншоте бледный, и матрица рисовала «параметр
+     * не распознан» у выраженных шкал (требование заказчика — соотношение СМК
+     * используем независимо от достоверности).
      *
      * @param array      $values  ['axisIdx' => 'знач.'] из формы
      * @param array      $sigPost ['axisIdx' => '1'] отмеченные p<0.05
      * @param array|null $old     прежняя структура (p / smk / ball сохраняем)
+     * @param array|null $smkPost ['axisIdx' => 'Z*>X>Y'] из формы (null — не правили)
      */
-    public static function fromManual(array $values, int $count, array $sigPost = [], ?array $old = null): array {
+    public static function fromManual(array $values, int $count, array $sigPost = [], ?array $old = null, ?array $smkPost = null): array {
         $out = [
             'aligned' => array_fill(0, $count, null),
             'p'       => $old['p'] ?? array_fill(0, $count, null),
@@ -316,6 +322,15 @@ final class Phys {
             if ($i < 0 || $i >= $count) continue;
             $v = trim((string) $v);
             $out['aligned'][$i] = $v === '' ? null : (float) str_replace([',', '−', '–'], ['.', '-', '-'], $v);
+        }
+        if ($smkPost !== null) {
+            foreach ($smkPost as $i => $v) {
+                $i = (int) $i;
+                if ($i < 0 || $i >= $count) continue;
+                // Пустое поле = «параметр не распознан», это допустимое значение:
+                // оператор мог стереть ошибочно распознанный токен.
+                $out['smk'][$i] = self::normalizeSmk(trim((string) $v));
+            }
         }
         for ($i = 0; $i < $count; $i++) {
             $out['sig'][$i] = !empty($sigPost[$i]);

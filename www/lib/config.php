@@ -87,6 +87,9 @@ if (!function_exists('cfg_settings_whitelist')) {
             'ADMIN_EMAIL', 'ERROR_EMAIL',
             'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME',
             'ADMIN_PASSWORD',
+            // Матрица: пороги пунктира и контраст размеров кружков. Оператор
+            // двигает пунктир прямо на матрице — значение уходит сюда же.
+            'MATRIX_LOW_PCT', 'MATRIX_HIGH_PCT', 'MATRIX_MID_BAND_PCT', 'MATRIX_SIZE_POWER',
         ];
     }
 }
@@ -133,6 +136,18 @@ $config = [
     'YANDEX_OCR_MODEL'      => cfg_env('YANDEX_OCR_MODEL', 'page'),
     // '1' → Yandex Vision OCR participates in the PDF-OCR chain. Needs key + folder.
     'YANDEX_OCR_ENABLED'    => cfg_env('YANDEX_OCR_ENABLED', '1'),
+
+    /* ── Матрица «когниция × эмоция» (www/lib/matrix.php) ──────────────────
+       Пороги пунктира и контраст размеров кружков. Их двигает оператор — прямо
+       на матрице мышью или числом в /setup.php — и от них зависит не только
+       картинка, но и раздел отчёта, в который попадёт шкала (Metrics::level).
+       Полоса медианы задаётся в % от предела шкалы физиологии: «Знач.» у разных
+       методик разного порядка, абсолютное число здесь смысла не имеет. */
+    'MATRIX_LOW_PCT'        => cfg_env('MATRIX_LOW_PCT', '40'),
+    'MATRIX_HIGH_PCT'       => cfg_env('MATRIX_HIGH_PCT', '60'),
+    'MATRIX_MID_BAND_PCT'   => cfg_env('MATRIX_MID_BAND_PCT', '5'),
+    // Мультипликатор размера кружка: радиус ∝ вес^POWER. >1 — разница заметнее.
+    'MATRIX_SIZE_POWER'     => cfg_env('MATRIX_SIZE_POWER', '2'),
 
     'LLM_TIMEOUT_SEC'       => (int) cfg_env('LLM_TIMEOUT_SEC', '120'),
     'LLM_MAX_RETRIES'       => (int) cfg_env('LLM_MAX_RETRIES', '2'),

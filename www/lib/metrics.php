@@ -27,7 +27,7 @@ require_once __DIR__ . '/profile.php';
 require_once __DIR__ . '/phys.php';
 
 final class Metrics {
-    /** Границы уровня выраженности в % от максимума своей шкалы. */
+    /** Границы уровня выраженности в % от максимума своей шкалы (значения по умолчанию). */
     public const LOW_PCT = 40.0;
     public const HIGH_PCT = 60.0;
 
@@ -39,6 +39,50 @@ final class Metrics {
      */
     public const MID_BAND_FRAC = 0.05;
     public const MID_BAND_MIN = 0.5;
+
+    /**
+     * Контраст размеров кружков матрицы: радиус = R_MIN + (R_MAX−R_MIN)·вес^POWER.
+     * При 1 разница между «почти фоном» и «максимумом» линейная и на глаз почти
+     * не видна, поэтому по умолчанию 2 — крупные показатели заметно крупнее.
+     */
+    public const SIZE_POWER = 2.0;
+
+    /**
+     * Пороги — НАСТРОЙКА, а не константа: оператор двигает пунктир прямо на
+     * матрице (и правит числа в /setup.php), после чего кружки перекрашиваются,
+     * а разделы отчёта пересобираются по новым границам. Значения приходят из
+     * config.php (таблица settings) через configure(); пока его не позвали,
+     * работают константы выше — расчёт всегда детерминирован.
+     */
+    private static ?array $conf = null;
+
+    /** Применить настройки оператора (зовётся из np_boot()). */
+    public static function configure(array $cfg): void {
+        $num = static function ($v, float $def, float $min, float $max): float {
+            if ($v === null || $v === '' || !is_numeric($v)) return $def;
+            return max($min, min($max, (float) $v));
+        };
+        $low  = $num($cfg['MATRIX_LOW_PCT'] ?? null, self::LOW_PCT, 1.0, 98.0);
+        $high = $num($cfg['MATRIX_HIGH_PCT'] ?? null, self::HIGH_PCT, 2.0, 99.0);
+        if ($high <= $low) $high = min(99.0, $low + 1.0);   // порядок порогов держим сами
+        self::$conf = [
+            'low' => $low,
+            'high' => $high,
+            // Полоса медианы задаётся в процентах от предела шкалы физиологии.
+            'mid_band_frac' => $num($cfg['MATRIX_MID_BAND_PCT'] ?? null, self::MID_BAND_FRAC * 100.0, 0.0, 50.0) / 100.0,
+            'size_power' => $num($cfg['MATRIX_SIZE_POWER'] ?? null, self::SIZE_POWER, 0.2, 6.0),
+        ];
+    }
+
+    /** Текущее значение настройки (или константа по умолчанию). */
+    private static function conf(string $key, float $default): float {
+        return self::$conf === null ? $default : (float) (self::$conf[$key] ?? $default);
+    }
+
+    public static function lowPct(): float { return self::conf('low', self::LOW_PCT); }
+    public static function highPct(): float { return self::conf('high', self::HIGH_PCT); }
+    public static function midBandFrac(): float { return self::conf('mid_band_frac', self::MID_BAND_FRAC); }
+    public static function sizePower(): float { return self::conf('size_power', self::SIZE_POWER); }
 
     /**
      * Лестница пределов шкалы физиологии. Предел выбирается как первая ступень,
@@ -131,7 +175,7 @@ final class Metrics {
         $znas = [];
         foreach ($scores as $i => $s) $znas[$i] = self::floatOrNull($phys['aligned'][$i] ?? null);
         $physScale = self::physScale($znas);
-        $midBand = max(self::MID_BAND_MIN, self::MID_BAND_FRAC * $physScale);
+        $midBand = max(self::MID_BAND_MIN, self::midBandFrac() * $physScale);
 
         foreach ($scores as $i => $s) {
             $label = trim((string) $s['label']);
@@ -175,6 +219,7 @@ final class Metrics {
                 'phys_dir' => self::physDir($physState),
                 'smk' => $smk,
                 'smk_label' => self::smkLabel($smk),
+                'smk_meaning' => self::smkMeaning($smk),
                 'category' => $category,
                 'category_title' => self::CATEGORIES[$category]['title'],
                 'category_short' => self::CATEGORIES[$category]['short'],
@@ -218,6 +263,12 @@ final class Metrics {
             'totals' => self::totals($testKey, $axes, $indices),
             'phys_scale' => $physScale,
             'mid_band' => $midBand,
+            // Действующие пороги и контраст размеров — рядом с расчётом, чтобы и
+            // матрица, и её интерактивный слой рисовали ровно то, что посчитано.
+            'low_pct' => self::lowPct(),
+            'high_pct' => self::highPct(),
+            'mid_band_frac' => self::midBandFrac(),
+            'size_power' => self::sizePower(),
             'unit' => self::unit($testKey, $axes),
             'has_phys' => Phys::hasData($phys),
             'warnings' => $warnings,
@@ -360,8 +411,8 @@ final class Metrics {
 
     /** Уровень выраженности по доле от максимума своей шкалы. */
     public static function level(float $pct): string {
-        if ($pct < self::LOW_PCT) return 'low';
-        return $pct < self::HIGH_PCT ? 'mid' : 'high';
+        if ($pct < self::lowPct()) return 'low';
+        return $pct < self::highPct() ? 'mid' : 'high';
     }
 
     /**
@@ -498,6 +549,24 @@ final class Metrics {
         $letter = strtoupper(substr(ltrim($smk, '*'), 0, 1));
         if (!in_array($letter, ['X', 'Y', 'Z'], true)) return '';
         return ($strong ? 'значительно преобладает ' : 'преобладает ') . $letter;
+    }
+
+    /**
+     * Что доминирующий параметр СМК значит НА ПРАКТИКЕ. Соотношение X/Y/Z есть в
+     * выгрузке всегда — оно не зависит от достоверности отклонения, поэтому и в
+     * отчёт идёт всегда (требование заказчика). Само по себе оно не говорит,
+     * сильна реакция или нет: только КАКОЙ канал в ней ведущий.
+     */
+    public const SMK_MEANING = [
+        'Y' => 'ведущий канал — эмоциональный отклик (ЧСС, кожа, сосуды): тема отзывается прежде всего чувствами',
+        'X' => 'ведущий канал — психическое напряжение (ЭЭГ): тема требует обдумывания, её проще заметить за собой',
+        'Z' => 'ведущий канал — мышечная реакция (нажатие стилусом): ответ дан уверенно, как твёрдая позиция',
+    ];
+
+    /** Практический смысл доминирующего параметра шкалы (или пустая строка). */
+    public static function smkMeaning(string $smk): string {
+        $letter = self::dominant($smk);
+        return $letter === '' ? '' : (self::SMK_MEANING[$letter] ?? '');
     }
 
     /**

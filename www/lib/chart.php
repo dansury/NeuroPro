@@ -145,7 +145,16 @@ final class Chart {
             $lx = $cx + $labelR * cos($a);
             $ly = $cy + $labelR * sin($a);
             $anchor = abs(cos($a)) < 0.25 ? 'middle' : (cos($a) > 0 ? 'start' : 'end');
-            $svg[] = self::wrapLabel((string) $labels[$i], $lx, $ly, $anchor);
+            // Сколько места остаётся подписи до края картинки: у боковых осей это
+            // расстояние до края, у верхней/нижней — вдвое меньшее из двух.
+            $room = match ($anchor) {
+                'start' => $size - $lx - 3,
+                'end'   => $lx - 3,
+                default => 2 * min($lx, $size - $lx) - 6,
+            };
+            // Достоверное отклонение выделяем и на подписи оси, а не только точкой:
+            // так шкалы с p<0.05 видно с первого взгляда (#5).
+            $svg[] = self::wrapLabel((string) $labels[$i], $lx, $ly, $anchor, !empty($sig[$i]), (float) $room);
         }
 
         // Physiological overlay first (drawn under cognitive so the line reads on top).
@@ -205,21 +214,47 @@ final class Chart {
                    . 'font-size="10" fill="' . self::COG_TEXT . '">' . round((float) ($cogPct[$i] ?? 0)) . '%</text>';
         }
 
-        // Legend + пояснение обеих шкал. Квадратик легенды вертикально центрируем
-        // по базовой линии текста (раньше физиологический квадрат «съезжал» вниз).
-        $ly = $size - ($hasPhys ? 34 : 16);
-        $sq = 12;                 // сторона квадрата
-        $sqY = $ly - 10;          // верх квадрата: середина совпадает с серединой текста
-        $svg[] = '<rect x="' . ($cx - 175) . '" y="' . $sqY . '" width="' . $sq . '" height="' . $sq . '" fill="' . self::COG_STROKE . '"/>';
-        $svg[] = '<text x="' . ($cx - 157) . '" y="' . $ly . '" font-size="12" fill="' . self::TEXT . '">Ответы теста (% от максимума шкалы)</text>';
+        // Легенда и пояснения. Раньше координаты квадратиков и подписей были
+        // вбиты числами (cx−175, cx+78), а пояснения печатались одной строкой:
+        // на уменьшенной картинке (диаграмма и матрица на одном листе PDF, #7)
+        // подпись первого пункта заезжала под квадратик второго, а пояснения
+        // уходили за край. Теперь размер шрифта подбирается под ширину, а текст
+        // переносится по словам — наложиться пункты не могут.
+        $items = [['Ответы теста (% от максимума шкалы)', self::COG_STROKE, '1']];
+        if ($hasPhys) $items[] = ['Физиологический ответ', self::PHYS_FILL, '0.55'];
+        $notes = [];
         if ($hasPhys) {
-            $svg[] = '<rect x="' . ($cx + 78) . '" y="' . $sqY . '" width="' . $sq . '" height="' . $sq . '" fill="' . self::PHYS_FILL . '" fill-opacity="0.55" stroke="' . self::PHYS_STROKE . '"/>';
-            $svg[] = '<text x="' . ($cx + 96) . '" y="' . $ly . '" font-size="12" fill="' . self::TEXT . '">Физиологический ответ</text>';
-            $svg[] = '<text x="' . $cx . '" y="' . ($size - 18) . '" text-anchor="middle" font-size="10" fill="#8a949d">'
-                   . 'Физиология: «Знач.» на шкале ±' . self::num($physScale)
-                   . ', пунктир (50 %) — медиана; наружу — напряжение, к центру — его нет.</text>';
-            $svg[] = '<text x="' . $cx . '" y="' . ($size - 6) . '" text-anchor="middle" font-size="10" fill="#8a949d">'
-                   . 'Жирная точка — достоверное отклонение (p&lt;0.05).</text>';
+            $notes[] = 'Физиология: «Знач.» на шкале ±' . self::num($physScale)
+                     . ', пунктир (50 %) — медиана; наружу — напряжение, к центру — его нет.';
+            $notes[] = 'Жирная точка и жирная подпись оси — достоверное отклонение (p<0.05).';
+        }
+        $avail = $size - 16;
+        $noteLines = [];
+        foreach ($notes as $note) {
+            foreach (self::fitLines($note, $avail, 9.0) as $ln) $noteLines[] = $ln;
+        }
+        // Кегль легенды — самый крупный из тех, при котором строка ещё влезает.
+        $sq = 12; $gap = 22;
+        $fs = 12.0;
+        $width = static fn (array $items, float $fs, float $sq, float $gap): float =>
+            array_sum(array_map(static fn ($it) => $sq + 6 + self::textW($it[0], $fs), $items)) + $gap * (count($items) - 1);
+        foreach ([12.0, 11.0, 10.0, 9.0] as $try) {
+            $fs = $try;
+            if ($width($items, $try, $sq, $gap) <= $avail) break;
+        }
+        $ly = $size - 5 - count($noteLines) * 11 - 5;
+        $sqY = $ly - $sq + 2;     // низ квадрата совпадает с базовой линией текста
+        $lx = max(6.0, $cx - $width($items, $fs, $sq, $gap) / 2);
+        foreach ($items as [$label, $color, $opacity]) {
+            $svg[] = '<rect x="' . round($lx, 1) . '" y="' . round($sqY, 1) . '" width="' . $sq . '" height="' . $sq . '" fill="' . $color
+                   . '" fill-opacity="' . $opacity . '" stroke="' . $color . '"/>';
+            $svg[] = '<text x="' . round($lx + $sq + 6, 1) . '" y="' . round($ly, 1) . '" font-size="' . self::num($fs) . '" fill="'
+                   . self::TEXT . '">' . self::esc($label) . '</text>';
+            $lx += $sq + 6 + self::textW($label, $fs) + $gap;
+        }
+        foreach ($noteLines as $k => $line) {
+            $svg[] = '<text x="' . $cx . '" y="' . round($size - 5 - (count($noteLines) - 1 - $k) * 11, 1)
+                   . '" text-anchor="middle" font-size="9" fill="#8a949d">' . self::esc($line) . '</text>';
         }
 
         $svg[] = '</svg>';
@@ -256,7 +291,7 @@ final class Chart {
         return implode("\n", $out);
     }
 
-    private static function wrapLabel(string $text, float $x, float $y, string $anchor): string {
+    private static function wrapLabel(string $text, float $x, float $y, string $anchor, bool $bold = false, float $room = 0.0): string {
         // Honor explicit line breaks; otherwise split long labels onto 2 lines.
         if (strpos($text, "\n") !== false) {
             $lines = explode("\n", trim($text));
@@ -269,13 +304,61 @@ final class Chart {
                 $lines = [implode(' ', array_slice($words, 0, $mid)), implode(' ', array_slice($words, $mid))];
             }
         }
-        $dy0 = count($lines) > 1 ? -5 : 4;
-        $out = '<text x="' . round($x, 1) . '" y="' . round($y + $dy0, 1) . '" text-anchor="' . $anchor . '" font-size="10.5" fill="' . self::TEXT . '">';
+        // Подпись шире, чем есть места до края картинки? Сначала переносим по
+        // словам, а длинное слово («Интеллектуализация» у ИЖС) — через дефис;
+        // если и так не помещается в две строки, уменьшаем кегль. Обрезать
+        // подпись нельзя: «Интеллек-туализац-» не читается.
+        $fs = 10.5;
+        if ($room > 0) {
+            foreach ([10.5, 9.5, 8.5, 7.5] as $try) {
+                $fs = $try;
+                $fit = [];
+                foreach ($lines as $ln) {
+                    foreach (self::fitLines($ln, $room, $try, 9) as $part) $fit[] = $part;
+                }
+                if (count($fit) <= 2 || $try === 7.5) { $lines = $fit; break; }
+            }
+        }
+        $lh = round($fs + 1.5, 1);
+        $dy0 = count($lines) > 1 ? -($lh / 2 - 1) : 4;
+        $out = '<text x="' . round($x, 1) . '" y="' . round($y + $dy0, 1) . '" text-anchor="' . $anchor . '" font-size="' . self::num($fs) . '"'
+             . ($bold ? ' font-weight="bold"' : '') . ' fill="' . self::TEXT . '">';
         foreach ($lines as $k => $ln) {
-            $out .= '<tspan x="' . round($x, 1) . '" dy="' . ($k === 0 ? 0 : 12) . '">' . self::esc($ln) . '</tspan>';
+            $out .= '<tspan x="' . round($x, 1) . '" dy="' . ($k === 0 ? 0 : $lh) . '">' . self::esc($ln) . '</tspan>';
         }
         $out .= '</text>';
         return $out;
+    }
+
+    /** Ширина строки Verdana в пикселях (оценка по среднему кеглю). */
+    private static function textW(string $s, float $fontSize): float {
+        return mb_strlen($s) * $fontSize * 0.575;
+    }
+
+    /**
+     * Разбивает текст на строки, влезающие в заданную ширину. Слово длиннее
+     * строки переносится через дефис: у ИЖС есть подписи вроде
+     * «Интеллектуализация», которые иначе уезжают за край картинки.
+     *
+     * @return string[]
+     */
+    private static function fitLines(string $text, float $maxW, float $fontSize, int $maxLines = 3): array {
+        $per = max(4, (int) floor($maxW / ($fontSize * 0.575)));
+        $lines = [];
+        $cur = '';
+        foreach (preg_split('/\s+/u', trim($text)) ?: [] as $word) {
+            while (mb_strlen($word) > $per) {
+                if ($cur !== '') { $lines[] = $cur; $cur = ''; }
+                $lines[] = mb_substr($word, 0, $per - 1) . '-';
+                $word = mb_substr($word, $per - 1);
+            }
+            $try = $cur === '' ? $word : $cur . ' ' . $word;
+            if (mb_strlen($try) > $per && $cur !== '') { $lines[] = $cur; $cur = $word; }
+            else $cur = $try;
+        }
+        if ($cur !== '') $lines[] = $cur;
+        if (count($lines) > $maxLines) $lines = array_slice($lines, 0, $maxLines);
+        return $lines ?: [''];
     }
 
     /** Compact number: 9.0 → "9", -3.5 → "-3.5". */

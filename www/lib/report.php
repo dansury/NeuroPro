@@ -39,12 +39,16 @@ final class Report {
         if ($phys !== null && array_is_list($phys)) $phys = ['aligned' => $phys, 'p' => [], 'sig' => []];
         // Все числа отчёта — из одного детерминированного расчёта.
         $metrics = Metrics::build($profile, $phys);
+        // Диаграмма и матрица должны уместиться на ОДИН лист PDF, поэтому обе
+        // уменьшены примерно на треть от прежних 600/620 px, а пояснения под
+        // матрицей сжаты (compact). Раньше картинки занимали два листа, и клиент
+        // видел половину соотношения на одной странице, половину — на другой.
         $svg = Chart::fromMetrics($metrics, [
             'title' => Profile::chartTitle((string) ($profile['test_key'] ?? '')),
-            'size'  => 600,
+            'size'  => 400,
         ]);
         // Матрица под диаграммой — она заменила таблицы отчёта.
-        $matrix = Matrix::svg($metrics, ['width' => 620]);
+        $matrix = Matrix::svg($metrics, ['width' => 430, 'compact' => true]);
 
         $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
         $title = $h(($profile['name'] ?: 'Профиль') . ' — ' . ($profile['methodic'] ?: ''));
@@ -64,10 +68,12 @@ final class Report {
   .head img { height: 56px; }
   .brand { text-align: right; font-weight: bold; color: #2a3138; font-size: 13px; }
   .meta { margin: 14px 0 4px; }
-  .chart { text-align: center; margin: 8px 0; }
+  .chart { text-align: center; margin: 2px 0; }
   .chart svg { max-width: 100%; height: auto; }
-  .matrix { page-break-inside: avoid; }
-  .legend { color: #6b7682; font-size: 10.5px; margin: -4px 0 10px; }
+  /* Диаграмма + матрица + расшифровка номеров — один неразрывный блок: обе
+     картинки печатаются на одном листе, разрыв между ними запрещён. */
+  .figures { page-break-inside: avoid; }
+  .legend { color: #6b7682; font-size: 10px; margin: -2px 0 8px; text-align: center; }
   .totals { margin: 8px 0 18px; }
   .interp { margin-top: 8px; }
   .interp h1, .interp h2, .interp h3 { color: #b3203b; font-size: 14px; margin: 16px 0 6px; }
@@ -90,12 +96,13 @@ final class Report {
     Дата исследования: <?= $h($profile['date']) ?>.
   </div>
 
-  <div class="chart"><?= $svg ?></div>
-
-  <?php if ($matrix !== ''): ?>
-    <div class="chart matrix"><?= $matrix ?></div>
-    <?= Matrix::legendHtml($metrics) ?>
-  <?php endif; ?>
+  <div class="figures">
+    <div class="chart"><?= $svg ?></div>
+    <?php if ($matrix !== ''): ?>
+      <div class="chart matrix"><?= $matrix ?></div>
+      <?= Matrix::legendHtml($metrics) ?>
+    <?php endif; ?>
+  </div>
 
   <?= self::totals($metrics, $profile, $h) ?>
 
