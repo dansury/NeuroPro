@@ -165,6 +165,26 @@ if ($method === 'POST') {
         } catch (Throwable $e) {
             $messages[] = ['ok' => false, 'text' => '⚠️ SMTP-тест не прошёл: ' . $e->getMessage()];
         }
+    } elseif (($_POST['action'] ?? '') === 'mirror_env') {
+        $env_data = cfg_read_env_file();
+        if ($env_data === null) {
+            $messages[] = ['ok' => false, 'text' => '⚠️ Файл .env не найден.'];
+        } else {
+            $whitelist = cfg_settings_whitelist();
+            $selected  = (array) ($_POST['env_keys'] ?? []);
+            $imported  = [];
+            foreach ($env_data['vars'] as $k => $v) {
+                if ($v === '' || !in_array($k, $whitelist, true)) continue;
+                if ($selected && !in_array($k, $selected, true)) continue;
+                $store->setSetting($k, $v);
+                $imported[] = $k;
+            }
+            if ($imported) {
+                $messages[] = ['ok' => true, 'text' => '✅ Зеркалировано из .env: ' . implode(', ', $imported)];
+            } else {
+                $messages[] = ['ok' => false, 'text' => '⚠️ Нечего импортировать — все выбранные ключи пусты или уже совпадают.'];
+            }
+        }
     } elseif (($_POST['action'] ?? 'save') === 'save') {
         $edited = [];
         // String settings. Empty values never overwrite existing.
@@ -372,5 +392,54 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
   <h2>Тест SMTP</h2>
   <label><span>Кому отправить тестовое письмо</span><input type="text" name="smtp_test_to" placeholder="<?= $h($eff('ADMIN_EMAIL')) ?>"></label>
   <p><button class="ghost" type="submit" name="smtp_test" value="1">Отправить тестовое письмо</button></p>
+</form>
+
+<?php
+$env_data = cfg_read_env_file();
+$env_whitelist = cfg_settings_whitelist();
+$env_secret_keys = ['OPENROUTER_API_KEY', 'YANDEX_API_KEY', 'SMTP_PASS', 'ADMIN_PASSWORD'];
+?>
+<form method="post" autocomplete="off" class="card">
+  <input type="hidden" name="action" value="mirror_env">
+  <h2>Зеркалирование .env в настройки</h2>
+  <?php if ($env_data === null): ?>
+    <p class="muted">Файл <code>.env</code> не найден. Порядок поиска: <code>NP_ENV_FILE</code> → <code>&lt;над веб-корнем&gt;/.env</code> → <code>&lt;веб-корень&gt;/.env</code>.</p>
+  <?php else: ?>
+    <p class="lede">Файл: <code><?= $h($env_data['file']) ?></code>. Отметьте ключи, которые нужно скопировать в таблицу <code>settings</code> (приоритет выше .env — значения переживут деплой). Пустые и не входящие в белый список пропускаются.</p>
+    <div class="env-mirror" style="border:1px solid #e0e5ea;border-radius:6px;margin:10px 0 14px;max-height:400px;overflow:auto;font-size:12px;">
+      <div style="display:flex;gap:10px;padding:7px 10px;border-bottom:2px solid #e0e5ea;font-weight:bold;background:#f8f9fb;">
+        <span style="width:28px;text-align:center;">&#x2713;</span>
+        <span style="flex:1;">Ключ</span>
+        <span style="flex:1;">Значение в .env</span>
+        <span style="flex:1;">Текущее в настройках</span>
+      </div>
+      <?php
+      foreach ($env_data['vars'] as $ek => $ev):
+          if (!in_array($ek, $env_whitelist, true)) continue;
+          $is_secret = in_array($ek, $env_secret_keys, true);
+          $db_val = $current[$ek] ?? '';
+          $same = ($db_val !== '' && $db_val === $ev);
+          $display_env = $is_secret ? $mask_key($ev) : $ev;
+          $display_db  = $is_secret ? $mask_key($db_val) : $db_val;
+      ?>
+        <div style="display:flex;gap:10px;align-items:center;padding:5px 10px;border-bottom:1px solid #eef1f4;<?= $same ? 'color:#8a949d;' : '' ?>">
+          <span style="width:28px;text-align:center;">
+            <?php if ($ev !== ''): ?>
+              <input type="checkbox" name="env_keys[]" value="<?= $h($ek) ?>" <?= $same ? '' : 'checked' ?> style="width:auto;">
+            <?php else: ?>
+              <span class="muted">—</span>
+            <?php endif; ?>
+          </span>
+          <span style="flex:1;"><code><?= $h($ek) ?></code></span>
+          <span style="flex:1;word-break:break-all;"><?= $ev !== '' ? $h($display_env) : '<span class="muted">(пусто)</span>' ?></span>
+          <span style="flex:1;word-break:break-all;"><?= $db_val !== '' ? $h($display_db) : '<span class="muted">—</span>' ?><?= $same ? ' <span style="color:#5a9e6f;">=</span>' : '' ?></span>
+        </div>
+      <?php endforeach; ?>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button type="submit">Зеркалировать выбранные</button>
+      <span class="muted">Непустые отмеченные ключи будут скопированы в таблицу settings.</span>
+    </div>
+  <?php endif; ?>
 </form>
 </main></body></html>
