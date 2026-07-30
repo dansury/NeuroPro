@@ -94,6 +94,14 @@ final class Db {
             FOREIGN KEY (prompt_version_id) REFERENCES prompt_versions(id)
         )");
 
+        // Правка отчёта оператором (двойной клик по абзацу) — отмечаем время, чтобы
+        // в списке было видно, что текст уже не в том виде, в котором его выдала
+        // нейросеть. Догоняем БД, созданные до появления правки.
+        $icols = $pdo->query("PRAGMA table_info(interpretations)")->fetchAll(PDO::FETCH_COLUMN, 1);
+        if ($icols && !in_array('edited_at', $icols, true)) {
+            $pdo->exec("ALTER TABLE interpretations ADD COLUMN edited_at TEXT");
+        }
+
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_versions_prompt ON prompt_versions(prompt_id)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_interp_version ON interpretations(prompt_version_id)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_interp_profile ON interpretations(profile_id)");

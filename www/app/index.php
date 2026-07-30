@@ -11,6 +11,7 @@
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/excel.php';
 require_once __DIR__ . '/../lib/chart.php';
+require_once __DIR__ . '/../lib/matrix.php';
 
 $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 
@@ -34,6 +35,7 @@ try {
         case 'prompts':       view_prompts($cfg, $h); break;
         case 'prompt_edit':   $method === 'POST' ? act_prompt_save($cfg) : view_prompt_edit($cfg, $h); break;
         case 'prompt_delete': act_prompt_delete($cfg); break;
+        case 'interp_block':  act_interp_block($cfg); break;
         case 'interp_delete': act_interp_delete($cfg); break;
         default:              view_dashboard($cfg, $h);
     }
@@ -199,7 +201,11 @@ function view_result(array $cfg, callable $h): void {
     $p = profile_row((int)($_GET['id'] ?? 0));
     $prof = profile_decode($p);
     $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
-    $svg = cognitive_svg($prof, $phys);
+    // Расчёт один на всю страницу: диаграмма, матрица и таблица правки должны
+    // показывать одни и те же числа — и незачем считать их трижды.
+    $m = Metrics::build($prof, $phys);
+    $svg = cognitive_svg($prof, $phys, $m);
+    $matrix = Matrix::svg($m, ['width' => 900]);
     $interps = Db::all('SELECT i.*, v.version_no FROM interpretations i JOIN prompt_versions v ON v.id=i.prompt_version_id WHERE i.profile_id=? ORDER BY i.created_at DESC', [$p['id']]);
     $active = Prompts::activeVersion($prof['test_key']);
     ob_start(); ?>
@@ -212,7 +218,14 @@ function view_result(array $cfg, callable $h): void {
       Проверьте скриншот или введите значения вручную в таблице ниже.</div>
     <?php endif; ?>
     <div class="chart card"><?= $svg ?></div>
-    <?= phys_table_form($prof, $phys, (int)$p['id'], $h) ?>
+    <?php if ($matrix !== ''): ?>
+      <div class="card">
+        <div class="chart"><?= $matrix ?></div>
+        <?= Matrix::legendHtml($m) ?>
+        <p class="muted">Ровно эта матрица уходит в отчёт клиента вместо таблиц.</p>
+      </div>
+    <?php endif; ?>
+    <?= phys_table_form($prof, $phys, (int)$p['id'], $h, $m) ?>
     <form method="post" action="?p=interpret" class="row">
       <input type="hidden" name="id" value="<?= (int)$p['id'] ?>">
       <button class="btn" type="submit" <?= $active ? '' : 'disabled' ?>>▶ Сделать интерпретацию (промпт <?= $active ? 'v'.$h($active['version_no']).', '.$h($active['model_id']) : 'не выбран' ?>)</button>
@@ -220,16 +233,87 @@ function view_result(array $cfg, callable $h): void {
     </form>
     <?php foreach ($interps as $it): ?>
       <div class="card">
-        <div class="row"><h2>Интерпретация (промпт v<?= $h($it['version_no']) ?>, <?= $h($it['model_id']) ?>) <span class="muted"><?= $h($it['created_at']) ?></span></h2>
+        <div class="row"><h2>Интерпретация (промпт v<?= $h($it['version_no']) ?>, <?= $h($it['model_id']) ?>) <span class="muted"><?= $h($it['created_at']) ?></span>
+          <?php if (!empty($it['edited_at'])): ?><span class="muted">· отредактировано <?= $h($it['edited_at']) ?></span><?php endif; ?></h2>
           <span>
             <a class="btn sm" href="?p=report&interp=<?= (int)$it['id'] ?>&print=1" target="_blank">⤓ PDF</a>
             <a class="btn sm" href="?p=email&interp=<?= (int)$it['id'] ?>" onclick="return confirm('Отправить отчёт на почту клиента?')">✉ На почту</a>
             <a class="btn sm danger" href="?p=interp_delete&interp=<?= (int)$it['id'] ?>" onclick="return confirm('Удалить интерпретацию? Действие необратимо.')">🗑</a>
           </span>
         </div>
-        <div class="interp"><?= Report::interpToHtml($it['content']) ?></div>
+        <p class="muted">Двойной клик по абзацу — правка (Ctrl+Enter — сохранить, Esc — отмена).
+           Пустой абзац удаляется. Правка сразу попадает в PDF и в письмо.</p>
+        <div class="interp editable" data-interp="<?= (int)$it['id'] ?>"><?= Report::interpToEditableHtml($it['content']) ?></div>
       </div>
     <?php endforeach; ?>
+    <script>
+    /* Правка отчёта до выгрузки в PDF: двойной клик открывает абзац как текст
+       Markdown (ровно то, что лежит в базе), сохранение перерисовывает весь
+       блок интерпретации — после удаления абзаца номера сдвигаются. */
+    (function(){
+      let editing = null;   // редактируемый .np-block
+
+      // Состояние снимаем ДО подмены содержимого: удаление textarea вызывает
+      // blur, и если бы блок ещё считался редактируемым, обработчик blur начал
+      // бы вторую правку прямо во время перерисовки первой.
+      function close(block, html){
+        editing = null;
+        block.classList.remove('editing');
+        block.innerHTML = html;
+      }
+
+      function open(block, text){
+        if (editing) return;                       // одна правка за раз
+        editing = block;
+        const rendered = block.innerHTML;
+        const src = text !== undefined ? text : (block.dataset.src || '');
+        const ta = document.createElement('textarea');
+        ta.className = 'blockedit';
+        ta.value = src;
+        block.classList.add('editing');
+        block.innerHTML = '';
+        block.appendChild(ta);
+        ta.style.height = Math.max(70, ta.scrollHeight + 12) + 'px';
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+        ta.addEventListener('input', ()=>{ ta.style.height = Math.max(70, ta.scrollHeight + 4) + 'px'; });
+        ta.addEventListener('keydown', e=>{
+          if (e.key === 'Escape'){ e.preventDefault(); close(block, rendered); }
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){ e.preventDefault(); save(block, ta.value, rendered); }
+        });
+        // Клик мимо абзаца = сохранить: оператор правит текст, а не заполняет форму.
+        ta.addEventListener('blur', ()=>{ if (editing === block) save(block, ta.value, rendered); });
+      }
+
+      async function save(block, text, rendered){
+        const box = block.closest('.editable');
+        const idx = block.dataset.block;
+        if (text === (block.dataset.src || '')) { close(block, rendered); return; }
+        close(block, rendered);
+        const body = new URLSearchParams({interp: box.dataset.interp, block: idx, text: text});
+        try{
+          const r = await fetch('?p=interp_block', {method:'POST', body:body,
+            headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}});
+          const data = await r.json();
+          if (!data.ok) throw new Error(data.error || 'не удалось сохранить');
+          box.innerHTML = data.html;
+        }catch(err){
+          // Правка не теряется молча: возвращаем её в поле, чтобы оператор мог
+          // повторить сохранение или скопировать текст.
+          alert('Абзац не сохранён: ' + err.message);
+          const back = box.querySelector('.np-block[data-block="' + idx + '"]');
+          if (back) open(back, text);
+        }
+      }
+
+      document.querySelectorAll('.interp.editable').forEach(box=>{
+        box.addEventListener('dblclick', e=>{
+          const block = e.target.closest('.np-block');
+          if (block && box.contains(block)) open(block);
+        });
+      });
+    })();
+    </script>
     <?php
     layout('Результат', ob_get_clean(), $h);
 }
@@ -434,6 +518,32 @@ function act_prompt_delete(array $cfg): void {
     redirect('?p=prompts' . ($res['ok'] ? '' : '&err=' . urlencode($res['error'])));
 }
 
+/**
+ * Правка одного абзаца интерпретации (двойной клик на странице результата).
+ * Ответ — JSON с заново собранным HTML всей интерпретации: после удаления
+ * абзаца номера блоков сдвигаются, и перерисовать проще, чем синхронизировать
+ * их на клиенте. Правка сразу попадает и в PDF, и в письмо — они читают тот же
+ * текст из базы.
+ */
+function act_interp_block(array $cfg): void {
+    header('Content-Type: application/json; charset=utf-8');
+    $json = static function (array $data, int $code = 200): void {
+        http_response_code($code);
+        echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    };
+    $id = (int)($_POST['interp'] ?? 0);
+    $idx = (int)($_POST['block'] ?? -1);
+    $it = Db::one('SELECT * FROM interpretations WHERE id=?', [$id]);
+    if (!$it) { $json(['ok' => false, 'error' => 'Интерпретация не найдена'], 404); return; }
+    try {
+        $updated = Report::replaceBlock((string)$it['content'], $idx, (string)($_POST['text'] ?? ''));
+    } catch (Throwable $e) {
+        $json(['ok' => false, 'error' => $e->getMessage()], 409); return;
+    }
+    Db::q("UPDATE interpretations SET content=?, edited_at=datetime('now') WHERE id=?", [$updated, $id]);
+    $json(['ok' => true, 'html' => Report::interpToEditableHtml($updated)]);
+}
+
 function act_interp_delete(array $cfg): void {
     $it = Db::one('SELECT profile_id FROM interpretations WHERE id=?', [(int)($_GET['interp'] ?? 0)]);
     Db::q('DELETE FROM interpretations WHERE id=?', [(int)($_GET['interp'] ?? 0)]);
@@ -492,9 +602,12 @@ function profile_from_text(string $text, string $methodic): array {
             'score_max' => Profile::scoreMax($scores, $key)];
 }
 
-/** @param array|null $phys структура Phys::decode (aligned + p + sig) или null */
-function cognitive_svg(array $prof, ?array $phys = null): string {
-    return Chart::fromMetrics(Metrics::build($prof, $phys), [
+/**
+ * @param array|null $phys    структура Phys::decode (aligned + p + sig) или null
+ * @param array|null $metrics готовый расчёт, если он уже посчитан на странице
+ */
+function cognitive_svg(array $prof, ?array $phys = null, ?array $metrics = null): string {
+    return Chart::fromMetrics($metrics ?? Metrics::build($prof, $phys), [
         'title' => Profile::chartTitle((string)($prof['test_key'] ?? '')),
         'size' => 560,
     ]);
@@ -506,9 +619,9 @@ function cognitive_svg(array $prof, ?array $phys = null): string {
  * уйдёт в отчёт и в нейросеть, и может поправить «Знач.»/достоверность до
  * интерпретации. Строки с p<0.05 — жирные; пустое поле = данных нет.
  */
-function phys_table_form(array $prof, ?array $phys, int $id, callable $h): string {
+function phys_table_form(array $prof, ?array $phys, int $id, callable $h, ?array $metrics = null): string {
     if ($phys === null) return '';
-    $m = Metrics::build($prof, $phys);
+    $m = $metrics ?? Metrics::build($prof, $phys);
     ob_start(); ?>
     <div class="card">
       <h2>Расчёт по шкалам — проверьте перед интерпретацией</h2>
@@ -599,8 +712,13 @@ function layout(string $title, string $body, callable $h): void {
   input[type=text],textarea,select{width:100%;padding:8px 10px;border:1px solid #cfd6dd;border-radius:5px;font:inherit}
   .chk{display:flex;gap:8px;align-items:center} .chk input{width:auto}
   .chart{text-align:center} .chart svg{max-width:100%;height:auto}
+  .legend{color:#6b7682;font-size:11px;line-height:1.6}
   .paste{border:2px dashed #cfd6dd;border-radius:6px;padding:24px;text-align:center;color:#8a949d;cursor:text}
   .interp h1,.interp h2,.interp h3{color:#b3203b}
+  .interp.editable .np-block{border:1px solid transparent;border-radius:5px;padding:1px 6px;margin:0 -6px;cursor:text}
+  .interp.editable .np-block:hover{border-color:#e0e5ea;background:#fbfcfd}
+  .interp.editable .np-block.editing{border-color:#b3203b;background:#fff}
+  textarea.blockedit{width:100%;font:inherit;font-family:Verdana,Geneva,sans-serif;border:0;outline:0;resize:vertical;padding:6px 0;background:transparent}
   .msg.bad{background:#fdecef;border:1px solid #e0a6b0;padding:10px;border-radius:6px;margin:10px 0}
   .msg.warn{background:#fff8e6;border:1px solid #e8d29a;padding:10px;border-radius:6px;margin:10px 0}
   .msg.ok{background:#eaf7ee;border:1px solid #a8d5b5;padding:10px;border-radius:6px;margin:10px 0}
