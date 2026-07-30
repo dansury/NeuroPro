@@ -113,6 +113,13 @@ final class Db {
         if ($icols && !in_array('style_version_id', $icols, true)) {
             $pdo->exec("ALTER TABLE interpretations ADD COLUMN style_version_id INTEGER");
         }
+        // КОРЗИНА: удаление отчёта — мягкое. Оператор удаляет интерпретацию или
+        // весь анализ одним кликом, и раньше это было необратимо; теперь запись
+        // помечается временем удаления, месяц лежит в «Удалённых» и только потом
+        // исчезает совсем (Trash). Все списки читают строки с deleted_at IS NULL.
+        if ($icols && !in_array('deleted_at', $icols, true)) {
+            $pdo->exec("ALTER TABLE interpretations ADD COLUMN deleted_at TEXT");
+        }
 
         // Сам скриншот «смысло-эмоциональной значимости» (data URI): оператору
         // нужно видеть исходную картинку рядом с распознанным расчётом, чтобы
@@ -121,10 +128,18 @@ final class Db {
         if ($pcols && !in_array('phys_image', $pcols, true)) {
             $pdo->exec("ALTER TABLE profiles ADD COLUMN phys_image TEXT");
         }
+        // Тот же мягкий путь удаления, что и у интерпретаций: удалённый анализ
+        // уходит в корзину вместе со своими интерпретациями (у них deleted_at
+        // остаётся пустым — они возвращаются вместе с анализом).
+        if ($pcols && !in_array('deleted_at', $pcols, true)) {
+            $pdo->exec("ALTER TABLE profiles ADD COLUMN deleted_at TEXT");
+        }
 
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_versions_prompt ON prompt_versions(prompt_id)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_interp_version ON interpretations(prompt_version_id)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_interp_profile ON interpretations(profile_id)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_interp_deleted ON interpretations(deleted_at)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_profiles_deleted ON profiles(deleted_at)");
     }
 
     /* convenience helpers */
