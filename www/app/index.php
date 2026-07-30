@@ -245,11 +245,11 @@ function view_result(array $cfg, callable $h): void {
       </div>
     <?php endif; ?>
     <?= phys_table_form($prof, $phys, (int)$p['id'], $h, $m, (string)($p['phys_image'] ?? '')) ?>
-    <form method="post" action="?p=interpret" class="row">
+    <form method="post" action="?p=interpret" class="row" id="interpform">
       <input type="hidden" name="id" value="<?= (int)$p['id'] ?>">
       <span class="row" style="justify-content:flex-start;flex-wrap:wrap">
       <?php if ($active): ?>
-        <button class="btn" type="submit">▶ Сделать интерпретацию (промпт v<?= $h($active['version_no']) ?>, <?= $h($active['model_id']) ?>)</button>
+        <button class="btn" type="submit">▶ Составить интерпретацию (промпт v<?= $h($active['version_no']) ?>, <?= $h($active['model_id']) ?>)</button>
       <?php elseif ($famVersions): ?>
         <span class="muted">Промпт не выбран — выберите:</span>
         <select name="version_id">
@@ -257,9 +257,9 @@ function view_result(array $cfg, callable $h): void {
             <option value="<?= (int)$v['id'] ?>">v<?= $h($v['version_no']) ?> — <?= $h($v['model_id']) ?><?= $v['comment'] ? ' · '.$h($v['comment']) : '' ?></option>
           <?php endforeach; ?>
         </select>
-        <button class="btn" type="submit">▶ Сделать интерпретацию</button>
+        <button class="btn" type="submit">▶ Составить интерпретацию</button>
       <?php else: ?>
-        <button class="btn" type="submit" disabled>▶ Сделать интерпретацию (промпт не выбран)</button>
+        <button class="btn" type="submit" disabled>▶ Составить интерпретацию (промпт не выбран)</button>
         <a class="btn ghost" href="?p=prompts">Создать промпт →</a>
       <?php endif; ?>
       </span>
@@ -268,6 +268,41 @@ function view_result(array $cfg, callable $h): void {
         <a class="btn ghost danger" href="?p=profile_delete&id=<?= (int)$p['id'] ?>" onclick="return confirm('Удалить анализ и все его интерпретации? Действие необратимо.')">🗑 Удалить анализ</a>
       </span>
     </form>
+    <?php if ($active || $famVersions): ?>
+      <!-- Полоса хода: интерпретация идёт десятки секунд (два слоя — первый
+           пишет текст, второй его правит), и без обратной связи оператор жал
+           кнопку повторно, порождая лишние запросы к нейросети (#12). -->
+      <div class="card np-progress" id="interp-progress" hidden>
+        <div class="row"><b>Составляем интерпретацию…</b><span class="muted" id="interp-timer">0 с</span></div>
+        <div class="bar"><i></i></div>
+        <p class="muted" id="interp-step">Шаг 1 из 2: разбор показателей нейросетью. Не закрывайте страницу.</p>
+      </div>
+      <script>
+      (function(){
+        var f=document.getElementById('interpform'), box=document.getElementById('interp-progress');
+        if(!f||!box) return;
+        f.addEventListener('submit', function(){
+          // Кнопку гасим ПОСЛЕ отправки формы (setTimeout): disabled-кнопка не
+          // попадает в тело запроса, а браузер уже начал отправку.
+          setTimeout(function(){
+            f.querySelectorAll('button,select,a.btn').forEach(function(el){
+              if(el.tagName==='A') el.classList.add('off'); else el.disabled=true;
+            });
+          }, 0);
+          box.hidden=false;
+          box.scrollIntoView({behavior:'smooth', block:'nearest'});
+          var t=0, timer=document.getElementById('interp-timer'), step=document.getElementById('interp-step');
+          setInterval(function(){
+            t++;
+            timer.textContent=t+' с';
+            // Точного прогресса у нас нет — есть два известных шага; вторая
+            // фраза появляется примерно тогда, когда первый слой обычно готов.
+            if(t===35) step.textContent='Шаг 2 из 2: литературная правка отчёта. Не закрывайте страницу.';
+          }, 1000);
+        });
+      })();
+      </script>
+    <?php endif; ?>
     <?php foreach ($interps as $it): ?>
       <div class="card">
         <div class="row"><h2>Интерпретация (промпт v<?= $h($it['version_no']) ?>, <?= $h($it['model_id']) ?>) <span class="muted"><?= $h($it['created_at']) ?></span>
@@ -363,6 +398,7 @@ function view_report(array $cfg): void {
     $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
     $html = Report::html($prof, Report::interpToHtml($it['content']), $cfg, [
         'phys' => $phys, 'autoprint' => !empty($_GET['print']),
+        'conf' => interp_math_conf($it),
     ]);
     header('Content-Type: text/html; charset=utf-8');
     echo $html;
@@ -371,12 +407,21 @@ function view_report(array $cfg): void {
 function view_prompts(array $cfg, callable $h): void {
     ob_start(); ?>
     <h1>Промпты</h1>
-    <?php foreach (Prompts::allFamilies() as $f): ?>
+    <?php foreach (Prompts::allFamilies() as $f):
+        // Второй слой — не методика, а обработка готового текста: у него другая
+        // подпись кнопки и пояснение, иначе «Удалить методику» вводит в
+        // заблуждение (методик у него нет).
+        $isStyle = (string)$f['test_key'] === Interpret::STYLE_KEY; ?>
       <div class="card">
         <div class="row"><h2><?= $h($f['name']) ?> <span class="muted">[<?= $h($f['test_key']) ?>]</span></h2>
           <a class="btn sm danger" href="?p=prompt_family_delete&id=<?= (int)$f['id'] ?>"
-             onclick="return confirm('Удалить всё семейство промптов «<?= $h($f['name']) ?>» вместе со всеми версиями и интерпретациями? При следующем запуске оно пересоздастся с чистой версией v1.')">🗑 Удалить методику</a>
+             onclick="return confirm('Удалить всё семейство промптов «<?= $h($f['name']) ?>» вместе со всеми версиями и интерпретациями? При следующем запуске оно пересоздастся с чистой версией v1.')">🗑 Удалить <?= $isStyle ? 'слой' : 'методику' ?></a>
         </div>
+        <?php if ($isStyle): ?>
+          <p class="muted">Второй слой: правит язык уже готового отчёта — короче и живее, факты не трогает.
+             Применяется после интерпретации любой методики. Если снять активную версию (удалить её),
+             слой отключается и клиент получает текст первого слоя как есть.</p>
+        <?php endif; ?>
         <table class="grid"><tr><th>Версия</th><th>Модель</th><th>Комментарий</th><th>Интерпретаций</th><th>Активна</th><th></th></tr>
         <?php foreach (Prompts::versions((int)$f['id']) as $v):
             $isActive = (int)$f['active_version_id'] === (int)$v['id']; ?>
@@ -585,14 +630,21 @@ function act_interpret(array $cfg): void {
     // Нейросеть получает РАСЧЁТ (Metrics), а не сырой текст OCR: уровни,
     // достоверность и разделы считает код, модель только пишет текст.
     $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
+    // СЛОЙ МАТЕМАТИКИ считаем ЗДЕСЬ и сохраняем вместе с текстом: пороги матрицы
+    // оператор двигает мышью, и модель обязана получить именно те значения,
+    // которые он выставил к этому моменту, а отчёт — собраться по ним же (#14).
+    $metrics = Metrics::build($prof, $phys);
     // Ошибку нейросети показываем на странице результата, а не голой 500-й.
     try {
-        $content = Interpret::run($prof, $phys, $version);
+        $res = Interpret::run($prof, $phys, $version, Interpret::styleVersion());
     } catch (Throwable $e) {
         redirect('?p=result&id=' . $id . '&err=' . urlencode('Нейросеть недоступна, интерпретация не создана: ' . $e->getMessage()));
     }
-    Interpret::save($id, (int)$version['id'], $version['model_id'], $content);
-    redirect('?p=result&id=' . $id . '&ok=' . urlencode('Интерпретация готова.'));
+    Interpret::save($id, (int)$version['id'], $version['model_id'], $res['text'], $metrics, $res['style_version_id']);
+    // Сбой второго слоя не прячем: текст сохранён, но он без литературной правки.
+    $msg = 'Интерпретация готова.'
+         . ($res['style_error'] !== null ? ' Литературный слой не применён (' . $res['style_error'] . ').' : '');
+    redirect('?p=result&id=' . $id . '&' . ($res['style_error'] !== null ? 'err' : 'ok') . '=' . urlencode($msg));
 }
 
 function act_email(array $cfg): void {
@@ -603,7 +655,8 @@ function act_email(array $cfg): void {
     $p = profile_row($pid);
     $prof = profile_decode($p);
     $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
-    $html = Report::html($prof, Report::interpToHtml($it['content']), $cfg, ['phys' => $phys]);
+    $html = Report::html($prof, Report::interpToHtml($it['content']), $cfg,
+        ['phys' => $phys, 'conf' => interp_math_conf($it)]);
     $to = $cfg['ADMIN_EMAIL'] ?? '';
     if ($to === '') {
         redirect('?p=result&id=' . $pid . '&err=' . urlencode('Не задан адрес получателя (ADMIN_EMAIL в настройках /setup.php).'));
@@ -679,6 +732,20 @@ function act_prompt_family_delete(array $cfg): void {
 
 /* ─────────────────────────── Helpers ─────────────────────────── */
 
+/**
+ * Настройки слоя математики, по которым сделана эта интерпретация. Пороги
+ * матрицы — общая настройка сервиса, и оператор двигает их мышью; без снимка
+ * PDF, собранный после сдвига, разложил бы шкалы по другим разделам, чем текст,
+ * который читает клиент (#14). У интерпретаций, сделанных до появления снимка,
+ * его нет — там честно считаем по текущим настройкам.
+ */
+function interp_math_conf(array $interp): array {
+    $raw = $interp['metrics_json'] ?? null;
+    if (!is_string($raw) || trim($raw) === '') return [];
+    $snapshot = json_decode($raw, true);
+    return is_array($snapshot) ? Metrics::confFromSnapshot($snapshot) : [];
+}
+
 function profile_row(int $id): array {
     $p = Db::one('SELECT * FROM profiles WHERE id=?', [$id]);
     if (!$p) throw new RuntimeException('Профиль не найден');
@@ -720,7 +787,9 @@ function methodic_options(): array {
     $out = [];
     foreach (Prompts::allFamilies() as $fam) {
         $key = (string)$fam['test_key'];
-        if ($key === '') continue;
+        // Семейство второго слоя — не методика: у него нет ни тестов, ни
+        // профилей, и в списке «какой тест загружаем» ему делать нечего.
+        if ($key === '' || $key === Interpret::STYLE_KEY) continue;
         $out[$key] = $labels[$key] ?? (string)$fam['name'];
     }
     return $out;
@@ -878,11 +947,17 @@ function layout(string $title, string $body, callable $h): void {
   .legend{color:#6b7682;font-size:11px;line-height:1.6}
   .paste{border:2px dashed #cfd6dd;border-radius:6px;padding:24px;text-align:center;color:#8a949d;cursor:text}
   .shot img{max-width:100%;border:1px solid #d7dde3;border-radius:6px;margin:4px 0 10px}
-  .interp h1,.interp h2,.interp h3{color:#b3203b}
+  .interp h1,.interp h2,.interp h3,.interp h4,.interp h5,.interp h6{color:#b3203b}
+  .interp h4,.interp h5,.interp h6{font-size:13px;margin:12px 0 4px}
   .interp.editable .np-block{border:1px solid transparent;border-radius:5px;padding:1px 6px;margin:0 -6px;cursor:text}
   .interp.editable .np-block:hover{border-color:#e0e5ea;background:#fbfcfd}
   .interp.editable .np-block.editing{border-color:#b3203b;background:#fff}
   textarea.blockedit{width:100%;font:inherit;font-family:Verdana,Geneva,sans-serif;border:0;outline:0;resize:vertical;padding:6px 0;background:transparent}
+  .np-progress .bar{height:6px;background:#eef1f4;border-radius:3px;overflow:hidden;margin:8px 0 4px}
+  .np-progress .bar i{display:block;height:100%;width:40%;background:#b3203b;border-radius:3px;
+                      animation:np-run 1.4s ease-in-out infinite}
+  @keyframes np-run{0%{margin-left:-40%}100%{margin-left:100%}}
+  .btn.off{opacity:.5;pointer-events:none}
   .msg.bad{background:#fdecef;border:1px solid #e0a6b0;padding:10px;border-radius:6px;margin:10px 0}
   .msg.warn{background:#fff8e6;border:1px solid #e8d29a;padding:10px;border-radius:6px;margin:10px 0}
   .msg.ok{background:#eaf7ee;border:1px solid #a8d5b5;padding:10px;border-radius:6px;margin:10px 0}

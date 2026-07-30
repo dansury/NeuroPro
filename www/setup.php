@@ -346,7 +346,8 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
   (страница результата) — значение сохраняется сюда. Пороги решают не только цвет кружка, но и
   раздел отчёта, в который попадёт шкала: ниже нижнего порога — «низкий» уровень, выше верхнего —
   «высокий». Полоса медианы задаётся в процентах от предела шкалы физиологии, потому что «Знач.»
-  у разных методик разного порядка.</p>
+  у разных методик разного порядка. Из отчёта выпадают только те показатели, что ниже
+  <b>обоих</b> порогов сразу — и по ответам теста, и по нижней границе полосы медианы.</p>
   <div class="row">
     <label><span>Нижний порог, % (по умолчанию <?= $h(Metrics::num(Metrics::LOW_PCT)) ?>)</span>
       <input type="number" min="1" max="98" step="0.5" name="MATRIX_LOW_PCT" value="<?= $h($eff('MATRIX_LOW_PCT')) ?>"></label>
@@ -356,8 +357,8 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
   <div class="row">
     <label><span>Полоса медианы, % от шкалы физиологии (по умолчанию <?= $h(Metrics::num(Metrics::MID_BAND_FRAC * 100)) ?>)</span>
       <input type="number" min="0" max="50" step="0.5" name="MATRIX_MID_BAND_PCT" value="<?= $h($eff('MATRIX_MID_BAND_PCT')) ?>"></label>
-    <label><span>Мультипликатор размера кружка (1 — линейно, больше — контрастнее)</span>
-      <input type="number" min="0.2" max="6" step="0.1" name="MATRIX_SIZE_POWER" value="<?= $h($eff('MATRIX_SIZE_POWER')) ?>"></label>
+    <label><span>Контраст размеров кружков (0 — все одинаковые, <?= $h(Metrics::num(Metrics::SIZE_CONTRAST)) ?> — естественный разброс, больше — разница подчёркнута)</span>
+      <input type="number" min="0" max="6" step="0.1" name="MATRIX_SIZE_POWER" value="<?= $h($eff('MATRIX_SIZE_POWER')) ?>"></label>
   </div>
 
   <h2>Доступ</h2>

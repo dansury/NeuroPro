@@ -27,7 +27,8 @@ final class Report {
      * @param array  $profile   profile array (see Profile::fromSheets)
      * @param string $interpHtml interpretation rendered to HTML
      * @param array  $cfg       config (branding)
-     * @param array  $opts      ['phys' => Phys::decode-структура|null, 'autoprint' => bool]
+     * @param array  $opts      ['phys' => Phys::decode-структура|null, 'autoprint' => bool,
+     *                          'conf' => настройки слоя математики на момент интерпретации]
      */
     public static function html(array $profile, string $interpHtml, array $cfg, array $opts = []): string {
         $brand = $cfg['BRAND_NAME'] ?? 'НейроПро';
@@ -37,8 +38,13 @@ final class Report {
         $phys   = $opts['phys'] ?? null;
         // Обратная совместимость: старые вызовы передавали голый aligned-массив.
         if ($phys !== null && array_is_list($phys)) $phys = ['aligned' => $phys, 'p' => [], 'sig' => []];
-        // Все числа отчёта — из одного детерминированного расчёта.
-        $metrics = Metrics::build($profile, $phys);
+        // Все числа отчёта — из одного детерминированного расчёта, и он должен
+        // быть ТЕМ ЖЕ, по которому писался текст: пороги матрицы оператор двигает
+        // мышью, поэтому вместе с интерпретацией сохраняется их снимок (#14).
+        $conf = (array) ($opts['conf'] ?? []);
+        $metrics = $conf
+            ? Metrics::withConf($conf, static fn () => Metrics::build($profile, $phys))
+            : Metrics::build($profile, $phys);
         // Диаграмма и матрица должны уместиться на ОДИН лист PDF, поэтому обе
         // уменьшены примерно на треть от прежних 600/620 px, а пояснения под
         // матрицей сжаты (compact). Раньше картинки занимали два листа, и клиент
@@ -48,7 +54,7 @@ final class Report {
             'size'  => 400,
         ]);
         // Матрица под диаграммой — она заменила таблицы отчёта.
-        $matrix = Matrix::svg($metrics, ['width' => 430, 'compact' => true]);
+        $matrix = Matrix::svg($metrics, ['width' => 430]);
 
         $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
         $title = $h(($profile['name'] ?: 'Профиль') . ' — ' . ($profile['methodic'] ?: ''));
@@ -75,8 +81,15 @@ final class Report {
   .figures { page-break-inside: avoid; }
   .legend { color: #6b7682; font-size: 10px; margin: -2px 0 8px; text-align: center; }
   .totals { margin: 8px 0 18px; }
-  .interp { margin-top: 8px; }
+  /* Текст интерпретации всегда начинается с НОВОГО листа: картинки и итоги —
+     первая страница, разбор — со второй. Раньше заголовок «… — интерпретация
+     теста …» дописывался под матрицей и разрывался между листами как придётся. */
+  .interp { margin-top: 8px; page-break-before: always; break-before: page; }
   .interp h1, .interp h2, .interp h3 { color: #b3203b; font-size: 14px; margin: 16px 0 6px; }
+  /* Подзаголовок шкалы (#### Название) — тот же красный, но мельче: модель
+     ставит его перед разбором каждого показателя. */
+  .interp h4, .interp h5, .interp h6 { color: #b3203b; font-size: 12.5px; margin: 12px 0 4px; }
+  .interp h1:first-child, .interp h2:first-child, .interp h3:first-child { margin-top: 0; }
   .interp p { margin: 6px 0; }
   .interp table { border-collapse: collapse; font-size: 11px; margin: 8px 0; }
   .interp table td, .interp table th { border: 1px solid #c9d2da; padding: 3px 6px; }
@@ -128,7 +141,6 @@ final class Report {
         if (!$totals) return '';
         ob_start(); ?>
 <div class="totals">
-  Заключение:<br>
   <?php foreach ($totals as $t): ?>
     <?= $h($t['text']) ?>.<br>
   <?php endforeach; ?>
@@ -189,7 +201,7 @@ final class Report {
         foreach (preg_split('/\n[ \t]*\n/', $norm) ?: [] as $chunk) {
             $rest = [];
             foreach (preg_split('/\n/', trim($chunk)) as $line) {
-                if (preg_match('/^#{1,3}\s+\S/', $line)) {
+                if (preg_match('/^#{1,6}\s+\S/', $line)) {
                     if ($rest) { $out[] = implode("\n", $rest); $rest = []; }
                     $out[] = trim($line);
                     continue;
@@ -266,7 +278,10 @@ final class Report {
                 continue;
             } elseif ($inTable) { $out[] = '</table>'; $inTable = false; }
 
-            if (preg_match('/^(#{1,3})\s+(.*)$/', $t, $m)) {
+            // Заголовки до шестого уровня: модель часто выделяет шкалу как
+            // «#### Состязательный мотив», и при потолке в три решётки такая
+            // строка печаталась в отчёте как обычный абзац с решётками.
+            if (preg_match('/^(#{1,6})\s+(.*)$/', $t, $m)) {
                 if ($inList) { $out[] = '</ul>'; $inList = false; }
                 $lvl = strlen($m[1]);
                 $out[] = "<h$lvl>" . self::inline($m[2], $h) . "</h$lvl>";

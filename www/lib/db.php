@@ -101,6 +101,18 @@ final class Db {
         if ($icols && !in_array('edited_at', $icols, true)) {
             $pdo->exec("ALTER TABLE interpretations ADD COLUMN edited_at TEXT");
         }
+        // Снимок слоя математики: пороги оператора и посчитанная по ним раскладка
+        // на момент интерпретации. Пороги матрицы общие для сервиса и меняются
+        // мышью прямо на картинке, поэтому отчёт, собранный позже, считался бы
+        // уже по другим правилам и расходился бы с текстом (Interpret::mathLayer).
+        if ($icols && !in_array('metrics_json', $icols, true)) {
+            $pdo->exec("ALTER TABLE interpretations ADD COLUMN metrics_json TEXT");
+        }
+        // Версия промпта ВТОРОГО слоя (литературная правка), если она применялась:
+        // история должна помнить обе версии, которыми сделан текст.
+        if ($icols && !in_array('style_version_id', $icols, true)) {
+            $pdo->exec("ALTER TABLE interpretations ADD COLUMN style_version_id INTEGER");
+        }
 
         // Сам скриншот «смысло-эмоциональной значимости» (data URI): оператору
         // нужно видеть исходную картинку рядом с распознанным расчётом, чтобы

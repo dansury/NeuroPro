@@ -14,12 +14,19 @@
 require_once __DIR__ . '/db.php';
 
 final class Prompts {
-    /** Ensure a prompt family exists for each known test, seeded from a file. */
-    public static function seed(string $testKey, string $name, string $body, string $defaultModel = 'yandexgpt', string $provider = 'yandex'): int {
+    /**
+     * Ensure a prompt family exists, seeded from a file.
+     *
+     * @param string|null $comment комментарий первой версии; null — «Импортировано
+     *                             из исходного промпта» (маркер v1 у методик)
+     */
+    public static function seed(string $testKey, string $name, string $body, string $defaultModel = 'yandexgpt',
+                                string $provider = 'yandex', ?string $comment = null): int {
         $existing = Db::one('SELECT id FROM prompts WHERE test_key = ?', [$testKey]);
         if ($existing) return (int) $existing['id'];
         $promptId = Db::insert('INSERT INTO prompts (test_key, name) VALUES (?, ?)', [$testKey, $name]);
-        $versionId = self::addVersion($promptId, $body, $defaultModel, $provider, 'Импортировано из исходного промпта');
+        $versionId = self::addVersion($promptId, $body, $defaultModel, $provider,
+            $comment ?? 'Импортировано из исходного промпта');
         self::setActive($promptId, $versionId);
         return $promptId;
     }

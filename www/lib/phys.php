@@ -4,8 +4,11 @@
  * physiological rows and align the signed "Знач." value (визуальная шкала
  * Эгоскопа: отклонение от медианы, столбец «Знач.»/«Значение») with the
  * cognitive axes so the chart can overlay it. Also extracts per row:
- * достоверность (p), доминирующий параметр (столбец «СМК»: Z>X>Y) и «Балл»
- * — последний нужен только для сверки с Excel, источник истины — Excel.
+ * достоверность (p) и доминирующий параметр (столбец «СМК»: Z>X>Y).
+ *
+ * ЧИТАЕТСЯ РОВНО ОДИН ЧИСЛОВОЙ СТОЛБЕЦ — «Знач.». Прочие числа скриншота
+ * («Балл», «m», счётчики) игнорируются: баллы теста приходят из выгрузки Excel,
+ * и второй источник тех же чисел только порождал расхождения.
  *
  * OCR of a screenshot table is inherently noisy, so this is best-effort and the
  * UI always lets the operator review/override the aligned values before the
@@ -35,7 +38,7 @@ final class Phys {
      * @param string $ocrText  recognized text of the screenshot
      * @param array  $labels   cognitive axis labels (defines order + count)
      * @return array ['aligned' => [signedZna|null,...], 'p' => [float|null,...],
-     *                'sig' => [bool,...], 'smk' => [string,...], 'ball' => [float|null,...],
+     *                'sig' => [bool,...], 'smk' => [string,...],
      *                'rows' => [...], 'error' => null]
      */
     public static function parse(string $ocrText, array $labels): array {
@@ -45,7 +48,6 @@ final class Phys {
             'p'       => array_fill(0, $n, null),
             'sig'     => array_fill(0, $n, false),
             'smk'     => array_fill(0, $n, ''),
-            'ball'    => array_fill(0, $n, null),
             'rows'    => [],
             'error'   => null,
         ];
@@ -78,15 +80,15 @@ final class Phys {
             $clean = self::stripLabel($span, (string) $labels[$idx]);
             $nums = self::allSigned($clean);
             if (!$nums) continue;
-            $out['aligned'][$idx] = $nums[0];                       // «Знач.» — первый числовой столбец
+            // «Знач.» — первый числовой столбец. Прочие числа строки («Балл»,
+            // «m», счётчики) не читаются вовсе: со скриншота нужен только этот
+            // столбец, баллы теста приходят из Excel.
+            $out['aligned'][$idx] = $nums[0];
             $out['p'][$idx] = self::pValue($span);
             $out['smk'][$idx] = self::smk($clean);
-            // «Балл» — последний числовой столбец, есть только если столбцов ≥ 3
-            // («Знач.», «m», …, «Балл»). Нужен исключительно для сверки с Excel.
-            $out['ball'][$idx] = count($nums) >= 3 ? $nums[count($nums) - 1] : null;
             $out['rows'][$idx] = [
                 'label' => $labels[$idx], 'zna' => $nums[0], 'p' => $out['p'][$idx],
-                'smk' => $out['smk'][$idx], 'ball' => $out['ball'][$idx], 'raw' => trim($span),
+                'smk' => $out['smk'][$idx], 'raw' => trim($span),
             ];
         }
 
@@ -109,10 +111,9 @@ final class Phys {
                     $out['aligned'][$idx] = $nums[$k];
                     $out['p'][$idx] = $pvals[$k] ?? null;
                     $out['smk'][$idx] = $smks[$k] ?? '';
-                    $out['ball'][$idx] = null; // в колоночном режиме столбцы не различить
                     $out['rows'][$idx] = [
                         'label' => $labels[$idx], 'zna' => $nums[$k], 'p' => $out['p'][$idx],
-                        'smk' => $out['smk'][$idx], 'ball' => null, 'raw' => 'column-major',
+                        'smk' => $out['smk'][$idx], 'raw' => 'column-major',
                     ];
                 }
             }
@@ -142,7 +143,6 @@ final class Phys {
             'p'       => array_fill(0, $n, null),
             'sig'     => array_fill(0, $n, false),
             'smk'     => array_fill(0, $n, ''),
-            'ball'    => array_fill(0, $n, null),
             'rows'    => [],
             'error'   => null,
         ];
@@ -180,10 +180,9 @@ final class Phys {
             $out['p'][$idx] = $p;
             $out['sig'][$idx] = $sig;
             $out['smk'][$idx] = self::normalizeSmk((string) ($r['smk'] ?? ''));
-            $out['ball'][$idx] = isset($r['ball']) && is_numeric($r['ball']) ? (float) $r['ball'] : null;
             $out['rows'][$idx] = [
                 'label' => $label, 'zna' => $zna, 'p' => $p,
-                'smk' => $out['smk'][$idx], 'ball' => $out['ball'][$idx], 'raw' => 'vision',
+                'smk' => $out['smk'][$idx], 'raw' => 'vision',
             ];
         }
         ksort($out['rows']);
@@ -304,7 +303,7 @@ final class Phys {
      *
      * @param array      $values  ['axisIdx' => 'знач.'] из формы
      * @param array      $sigPost ['axisIdx' => '1'] отмеченные p<0.05
-     * @param array|null $old     прежняя структура (p / smk / ball сохраняем)
+     * @param array|null $old     прежняя структура (p / smk сохраняем)
      * @param array|null $smkPost ['axisIdx' => 'Z*>X>Y'] из формы (null — не правили)
      */
     public static function fromManual(array $values, int $count, array $sigPost = [], ?array $old = null, ?array $smkPost = null): array {
@@ -313,7 +312,6 @@ final class Phys {
             'p'       => $old['p'] ?? array_fill(0, $count, null),
             'sig'     => array_fill(0, $count, false),
             'smk'     => $old['smk'] ?? array_fill(0, $count, ''),
-            'ball'    => $old['ball'] ?? array_fill(0, $count, null),
             'rows'    => $old['rows'] ?? [],
             'error'   => null, // оператор поправил вручную — прежняя ошибка OCR снята
         ];
@@ -346,7 +344,8 @@ final class Phys {
     /**
      * Decode the stored phys_json into the canonical structure. Backward
      * compatible: older profiles stored a plain aligned array, and profiles
-     * saved before СМК-парсинга не имеют полей smk/ball.
+     * saved before СМК-парсинга не имеют поля smk. Столбец «Балл», который
+     * читался раньше, отброшен: со скриншота берётся только «Знач.».
      */
     public static function decode(?string $json, int $count): ?array {
         if ($json === null || trim($json) === '') return null;
@@ -365,7 +364,6 @@ final class Phys {
             'p'       => $norm($data['p'] ?? [], null),
             'sig'     => array_map('boolval', $norm($data['sig'] ?? [], false)),
             'smk'     => array_map('strval', $norm($data['smk'] ?? [], '')),
-            'ball'    => $norm($data['ball'] ?? [], null),
             'rows'    => $data['rows'] ?? [],
             'error'   => isset($data['error']) && $data['error'] !== '' ? (string) $data['error'] : null,
         ];
