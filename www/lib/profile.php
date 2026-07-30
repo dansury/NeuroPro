@@ -43,6 +43,24 @@ final class Profile {
         'Чувство вины'        => 9,
     ];
 
+    /**
+     * ИЖС/LSI: у каждой защиты свой максимум = число её вопросов в опроснике
+     * Плутчика–Келлермана–Конте (сырые баллы разных защит НЕ сравнимы между
+     * собой — их выравнивает именно доля от своего максимума). Эти же максимумы
+     * лежат в самой выгрузке Эгоскопа, поэтому «%» из файла и наш расчёт
+     * совпадают до десятых. Ключ — точная подпись защиты из выгрузки.
+     */
+    public const LSI_SCALE_MAX = [
+        'Отрицание'              => 13,
+        'Подавление'             => 12,
+        'Регрессия'              => 14,
+        'Компенсация'            => 10,
+        'Проекция'               => 13,
+        'Замещение'              => 13,
+        'Интеллектуализация'     => 12,
+        'Реактивное образование' => 10,
+    ];
+
     /** Индексы Басса-Дарки — детерминированные суммы шкал + границы нормы. */
     public const BD_INDICES = [
         'Индекс агрессивности' => ['scales' => ['Физическая агрессия', 'Раздражение', 'Вербальная агрессия'], 'min' => 17.0, 'max' => 25.0, 'cap' => 34],
@@ -181,11 +199,14 @@ final class Profile {
     }
 
     /**
-     * СМУ uses a 0–10 scale; LSI is reported as a percentage (0–100);
-     * Басса-Дарки — raw scores, chart scaled to the longest scale (13).
+     * СМУ uses a 0–10 scale; LSI и Басса-Дарки — сырые баллы, но у каждой шкалы
+     * свой максимум (число её вопросов), поэтому единый `score_max` для них — это
+     * лишь ЗАПАСНОЙ предел на случай нераспознанной подписи шкалы; реальный
+     * максимум берётся пошкально в scaleMax(). Для обоих берём самый длинный —
+     * так запасная нормировка хотя бы не завышает балл.
      */
     public static function scoreMax(array $scores, string $testKey): int {
-        if ($testKey === 'lsi') return 100;
+        if ($testKey === 'lsi') return max(self::LSI_SCALE_MAX);
         if ($testKey === 'bd') return max(self::BD_SCALE_MAX);
         $max = 10;
         foreach ($scores as $s) { if ($s['score'] > $max) $max = (int) ceil($s['score']); }
@@ -210,9 +231,30 @@ final class Profile {
         return self::CHART_TITLES[$testKey] ?? 'Профиль показателей';
     }
 
-    /** Максимум конкретной шкалы, если у теста он пошкальный (Басса-Дарки). */
+    /**
+     * Максимум конкретной шкалы, если у теста он пошкальный (Басса-Дарки и ИЖС:
+     * у каждой шкалы своё число вопросов). Подпись нормализуем, чтобы перенос
+     * слова с дефисом в выгрузке («Интеллектуа-\nлизация») не ломал поиск.
+     */
     public static function scaleMax(string $testKey, string $label): ?int {
-        return $testKey === 'bd' ? (self::BD_SCALE_MAX[trim($label)] ?? null) : null;
+        $table = match ($testKey) {
+            'bd'  => self::BD_SCALE_MAX,
+            'lsi' => self::LSI_SCALE_MAX,
+            default => null,
+        };
+        if ($table === null) return null;
+        $key = self::normLabel($label);
+        foreach ($table as $name => $max) {
+            if (self::normLabel($name) === $key) return $max;
+        }
+        return null;
+    }
+
+    /** Подпись шкалы для поиска: убираем переносы-дефисы и схлопываем пробелы. */
+    private static function normLabel(string $label): string {
+        $s = str_replace(["-\n", "-\r\n"], '', $label);      // перенос слова с дефисом
+        $s = preg_replace('/\s+/u', ' ', $s);                 // остальные переносы → пробел
+        return trim(mb_strtolower($s ?? $label));
     }
 
     /**
