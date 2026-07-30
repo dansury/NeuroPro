@@ -28,15 +28,27 @@ final class Interpret {
      * клиент получает текст первого слоя. Сбой второго слоя тоже не теряет
      * работу — возвращается текст первого (о причине пишем в лог).
      *
+     * Модель первого слоя обычно берётся из версии промпта, но оператор может
+     * выбрать другую прямо на странице результата и переделать отчёт на ней (#3).
+     * В этом случае $modelOverride/$providerOverride замещают модель версии —
+     * второй слой (style) при этом работает на своей модели, как задан.
+     *
      * @param array      $profile profile array
      * @param array|null $phys    структура Phys::decode (или null)
      * @param array      $version prompt_versions row to use
      * @param array|null $style   версия промпта второго слоя (null — не применять)
+     * @param string|null $modelOverride короткий id модели поверх версии (или null)
+     * @param string|null $providerOverride провайдер выбранной модели (или null)
      * @return array{text:string,draft:string,style_version_id:?int,style_error:?string}
      */
-    public static function run(array $profile, ?array $phys, array $version, ?array $style = null): array {
-        if (!empty($version['model_id'])) LLM::setModelOverride($version['model_id']);
-        if (!empty($version['provider'])) LLM::setProviderOverride($version['provider']);
+    public static function run(array $profile, ?array $phys, array $version, ?array $style = null,
+                              ?string $modelOverride = null, ?string $providerOverride = null): array {
+        $model = $modelOverride !== null && trim($modelOverride) !== ''
+            ? trim($modelOverride) : (string) ($version['model_id'] ?? '');
+        $provider = $modelOverride !== null && trim($modelOverride) !== ''
+            ? (string) ($providerOverride ?? '') : (string) ($version['provider'] ?? '');
+        if ($model !== '') LLM::setModelOverride($model);
+        if ($provider !== '') LLM::setProviderOverride($provider);
 
         $system = (string) $version['body'];
         $user = self::buildUserMessage($profile, $phys);
