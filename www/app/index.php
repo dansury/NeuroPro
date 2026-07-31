@@ -1277,6 +1277,11 @@ function phys_table_form(array $prof, ?array $phys, int $id, callable $h, ?array
         </div>
       <?php endif; ?>
       <?php foreach ($m['warnings'] as $w): ?><div class="msg warn">⚠ <?= $h($w) ?></div><?php endforeach; ?>
+      <?php if (!empty($m['first_step'])): ?>
+        <p class="muted">Отчёт закончится одним конкретным действием. Шкалу для него выбирает сервис
+        (не нейросеть): <b><?= $h($m['first_step']['label']) ?></b> — <?= $h($m['first_step']['basis_label']) ?>.
+        Поправите «Знач.» или достоверность — опора пересчитается.</p>
+      <?php endif; ?>
       <form method="post" action="?p=phys_save">
         <input type="hidden" name="id" value="<?= $id ?>">
         <table class="grid">
