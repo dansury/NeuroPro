@@ -40,6 +40,7 @@ try {
         case 'interp_block':  act_interp_block($cfg); break;
         case 'interp_text':   act_interp_text($cfg); break;
         case 'interp_source': view_interp_source($cfg); break;
+        case 'interp_paste':  act_interp_paste($cfg); break;
         case 'interp_delete': act_interp_delete($cfg); break;
         case 'profile_delete': act_profile_delete($cfg); break;
         case 'trash':         view_trash($cfg, $h); break;
@@ -294,9 +295,11 @@ function view_result(array $cfg, callable $h): void {
       <?php if ($active || $famVersions): ?>
         <!-- Рядом с кнопкой отчёта — то же самое, но без нейросети: копия того,
              что уходит в модель (промпты обоих слоёв + расчёт). type=button,
-             иначе кнопка отправила бы форму интерпретации (#1). -->
+             иначе кнопка отправила бы форму интерпретации (#1). Кнопка сразу
+             открывает окно вставки: оператор уходит с промптом в чужой чат и
+             возвращается с готовым отчётом, который надо куда-то деть. -->
         <button class="btn ghost" type="button" id="copysrc"
-                title="Скопировать в буфер: системные промпты обоих слоёв и данные, которые уходят в нейросеть">⧉ Скопировать промпт и данные</button>
+                title="Скопировать промпты обоих слоёв и данные — и сразу вставить в открывшемся окне готовый отчёт из чата">⧉ Скопировать промпт и данные</button>
       <?php endif; ?>
       </span>
       <span class="row" style="justify-content:flex-end;gap:8px">
@@ -322,46 +325,84 @@ function view_result(array $cfg, callable $h): void {
       <?php endif; ?>
     </form>
     <?php if ($active || $famVersions): ?>
-      <!-- Запасной путь копирования: браузер отдаёт буфер обмена только по
-           https (или на localhost), а сервис может стоять и без него. Тогда
-           текст просто раскрывается здесь и выделяется — Ctrl+C работает
-           всегда. Заодно оператор видит, что именно уходит в нейросеть. -->
-      <details class="card srcbox" id="srcbox" hidden>
-        <summary>Промпт и данные, которые уходят в нейросеть</summary>
-        <p class="muted">Два системных промпта (содержание и язык) и сообщение с расчётом —
-           ровно в том виде, в каком их получает модель. Текст только для чтения:
-           правки делаются на странице «Промпты».</p>
-        <textarea id="srcdump" rows="16" readonly></textarea>
-      </details>
+      <!-- Окно вставки. Копирование промпта — половина работы: отчёт оператор
+           получает в чужом чате и возвращается его сюда положить, а места для
+           этого не было (приходилось заводить интерпретацию нейросетью и
+           переписывать её текст). Поэтому кнопка копирования сразу открывает
+           поле вставки, а сам промпт лежит здесь же, ниже: буфер обмена
+           браузер отдаёт только по https (или на localhost), и без него текст
+           берётся выделением — Ctrl+C работает всегда. -->
+      <dialog class="np-dialog" id="srcdlg">
+        <form method="post" action="?p=interp_paste" id="pasteform">
+          <input type="hidden" name="id" value="<?= (int)$p['id'] ?>">
+          <input type="hidden" name="version_id" id="pasteversion" value="">
+          <div class="row"><h2 style="margin:0">Промпт с данными скопирован — вставьте готовый отчёт</h2>
+            <button class="btn sm ghost" type="button" id="srcclose" title="Закрыть (Esc)">✕</button></div>
+          <p class="muted" id="srcstate">Собираем промпт…</p>
+          <textarea id="pastetext" name="text" rows="14" placeholder="Ctrl+V — вставьте сюда текст отчёта из чата нейросети. Markdown: ## заголовок, **жирный**, - список."></textarea>
+          <div class="row editbar">
+            <span class="muted">Отчёт добавится в список новой интерпретацией — с правкой абзацев,
+              PDF и письмом, как у отчёта нейросети. Ctrl+Enter — сохранить, Esc — закрыть
+              (вставленный текст не пропадёт).</span>
+            <span><button class="btn" type="submit">Сохранить отчёт</button></span>
+          </div>
+          <details class="srcbox" id="srcbox">
+            <summary>Промпт и данные, которые уходят в нейросеть</summary>
+            <p class="muted">Два системных промпта (содержание и язык) и сообщение с расчётом —
+               ровно в том виде, в каком их получает модель. Текст только для чтения:
+               правки делаются на странице «Промпты».</p>
+            <textarea id="srcdump" rows="10" readonly></textarea>
+          </details>
+        </form>
+      </dialog>
       <script>
       (function(){
-        var btn=document.getElementById('copysrc'), box=document.getElementById('srcbox'),
-            dump=document.getElementById('srcdump');
-        if(!btn||!box||!dump) return;
-        var label=btn.textContent;
+        var btn=document.getElementById('copysrc'), dlg=document.getElementById('srcdlg'),
+            box=document.getElementById('srcbox'), dump=document.getElementById('srcdump'),
+            state=document.getElementById('srcstate'), ta=document.getElementById('pastetext'),
+            form=document.getElementById('pasteform'), vfield=document.getElementById('pasteversion');
+        if(!btn||!dlg||!dump||!ta) return;
         btn.addEventListener('click', async function(){
           // Версию промпта оператор мог выбрать вручную — берём ту же, что уйдёт
-          // в интерпретацию, иначе скопированное разошлось бы с отчётом.
+          // в интерпретацию, иначе скопированное разошлось бы с отчётом, а
+          // вставленный текст лёг бы в базу с чужой версией.
           var vsel=document.querySelector('#interpform select[name=version_id]'),
               msel=document.querySelector('#interpform select[name=model_id]'),
               url='?p=interp_source&id=<?= (int)$p['id'] ?>'
                  + (vsel&&vsel.value ? '&version_id='+encodeURIComponent(vsel.value) : '')
                  + (msel&&msel.value ? '&model_id='+encodeURIComponent(msel.value) : '');
-          btn.disabled=true; btn.textContent='Собираем…';
+          vfield.value = vsel && vsel.value ? vsel.value : '';
+          // Окно открываем СРАЗУ, до ответа сервера: оператору нужно поле для
+          // вставки, а не ожидание сборки промпта.
+          state.textContent='Собираем промпт…';
+          box.open=false;
+          if(!dlg.open) dlg.showModal();
+          ta.focus();
           try{
             var r=await fetch(url), d=await r.json();
             if(!d.ok) throw new Error(d.error||'не удалось собрать промпт');
             dump.value=d.text;
-            box.hidden=false;
             var copied=false;
             try{ await navigator.clipboard.writeText(d.text); copied=true; }catch(e){}
-            if(!copied){ box.open=true; dump.focus(); dump.select(); }
-            btn.textContent = copied ? '✓ Скопировано' : 'Ниже — выделено, нажмите Ctrl+C';
+            state.textContent = copied
+              ? '✓ Промпт с данными в буфере обмена. Вставьте его в чат нейросети, а готовый отчёт — сюда.'
+              : 'Буфер обмена недоступен (нужен https). Раскройте промпт ниже и скопируйте его Ctrl+C, а готовый отчёт вставьте сюда.';
+            if(!copied) box.open=true;
           }catch(err){
-            btn.textContent=label;
-            alert('Не удалось собрать промпт: '+err.message);
+            state.textContent='Промпт собрать не удалось: '+err.message+'. Поле вставки ниже работает — сохранить отчёт можно.';
           }
-          setTimeout(function(){ btn.textContent=label; btn.disabled=false; }, 2500);
+        });
+        document.getElementById('srcclose').addEventListener('click', function(){ dlg.close(); });
+        // Ctrl+Enter — как в правке отчёта: руки те же, привычка та же.
+        ta.addEventListener('keydown', function(e){
+          if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); form.requestSubmit(); }
+        });
+        // Уход со страницы с невставленным… точнее, с вставленным, но не
+        // сохранённым отчётом — потеря чужой работы: текст живёт только в поле.
+        var saving=false;
+        form.addEventListener('submit', function(){ saving=true; });
+        window.addEventListener('beforeunload', function(e){
+          if(!saving && ta.value.trim()!==''){ e.preventDefault(); e.returnValue=''; }
         });
       })();
       </script>
@@ -923,6 +964,37 @@ function act_interpret(array $cfg): void {
     redirect('?p=result&id=' . $id . '&' . ($res['style_error'] !== null ? 'err' : 'ok') . '=' . urlencode($msg));
 }
 
+/**
+ * Готовый отчёт, вставленный руками. Оператор копирует промпт с данными,
+ * получает текст в чужом чате и возвращается вставить его в окно, которое
+ * открылось сразу по кнопке копирования. Сохраняем так же, как интерпретацию
+ * нейросети: та же версия промпта и тот же снимок слоя математики — иначе PDF
+ * и письмо считались бы по порогам, отличным от тех, по которым считали текст.
+ */
+function act_interp_paste(array $cfg): void {
+    $id = (int)($_POST['id'] ?? 0);
+    $p = profile_row($id);
+    $prof = profile_decode($p);
+    // Версия — та же, что выбрана в форме интерпретации: вставленный текст
+    // получен по ЕЁ промпту, и в списке отчётов он должен стоять с ней.
+    $vid = (int)($_POST['version_id'] ?? 0);
+    $version = $vid ? Prompts::version($vid) : null;
+    if (!$version) $version = Prompts::activeVersion($prof['test_key']);
+    if (!$version) {
+        redirect('?p=result&id=' . $id . '&err=' . urlencode('Для этой методики не выбран промпт (страница «Промпты»).'));
+    }
+    // В базе — Markdown, как и у текста нейросети: правка абзацев, PDF и письмо
+    // читают его без оговорок.
+    $text = Report::normalizeForEdit((string)($_POST['text'] ?? ''));
+    if ($text === '') {
+        redirect('?p=result&id=' . $id . '&err=' . urlencode('Текст отчёта пуст — вставьте его в окно и сохраните.'));
+    }
+    $phys = Phys::decode($p['phys_json'] ?? null, count($prof['scores']));
+    // Модель не выдумываем: сервис не знает, в каком чате оператор получил текст.
+    Interpret::save($id, (int)$version['id'], Interpret::MANUAL_MODEL, $text, Metrics::build($prof, $phys));
+    redirect('?p=result&id=' . $id . '&ok=' . urlencode('Отчёт сохранён — вставлен вручную.'));
+}
+
 function act_email(array $cfg): void {
     require_once __DIR__ . '/../lib/mailer.php';
     $it = interp_row((int)($_GET['interp'] ?? 0));
@@ -1307,7 +1379,16 @@ function layout(string $title, string $body, callable $h, array $opts = []): voi
   textarea.fulledit{width:100%;font:inherit;font-family:Verdana,Geneva,sans-serif;border:1px solid #b3203b;
                     border-radius:5px;resize:vertical;padding:10px;background:#fff;line-height:1.5}
   .editbar{margin-top:8px;align-items:flex-start} .editbar .btn{margin-left:6px}
-  /* Копия того, что уходит в нейросеть — запасной путь, когда буфер недоступен. */
+  /* Окно «скопировал промпт → вставил готовый отчёт»: поле вставки сверху,
+     копия промпта — сложенной внизу (нужна, только когда буфер недоступен). */
+  .np-dialog{width:min(900px,94vw);max-height:90vh;border:1px solid #e0e5ea;border-radius:8px;
+             padding:16px;background:#fff;color:#2a3138;font:inherit;overflow:auto}
+  .np-dialog::backdrop{background:rgba(42,49,56,.45)}
+  .np-dialog h2{font-size:15px}
+  #pastetext{font-family:Verdana,Geneva,sans-serif;border:1px solid #b3203b;border-radius:5px;
+             padding:10px;resize:vertical;line-height:1.5}
+  .np-dialog .editbar .btn{white-space:nowrap}
+  .srcbox{margin-top:12px}
   .srcbox summary{cursor:pointer;font-weight:bold;color:#b3203b}
   .srcbox textarea{margin-top:8px;font-family:monospace;font-size:11px;white-space:pre;background:#fbfcfd}
   /* Корзина: ссылка нарочно неброская — она нужна редко. */
