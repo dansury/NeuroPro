@@ -49,12 +49,18 @@ const NP_PROMPT_V7_COMMENT = 'v7 (Басса-Дарки): описания ви�
 const NP_PROMPT_V8_COMMENT = 'v8 (Басса-Дарки): язык клиента вместо терминов (СМК, каналы, датчики) и запрет повторов — как у СМУ и ИЖС';
 const NP_PROMPT_V9_COMMENT = 'v9 (Басса-Дарки): «Скрытое напряжение» — сейчас условий для проявления нет, но готовность осталась и может вернуться';
 const NP_PROMPT_STYLE_COMMENT = 'Второй слой: литературная правка готового отчёта (язык, краткость; факты не трогает)';
+// Поколение «Sonnet» — не следующий номер версии, а отдельная линия промптов:
+// та же математика и те же разделы, но отчёт вдвое короче. Заказчик отличает их
+// по метке, поэтому в комментарии стоит слово «Sonnet», а не «v10».
+const NP_PROMPT_SONNET_COMMENT = 'Sonnet: отчёт вдвое короче — один абзац на шкалу, три рекомендации, сжатые итоги и резюме';
+const NP_PROMPT_STYLE_SONNET_COMMENT = 'Sonnet (второй слой): правка на сжатие — режет воду, факты, шкалы и разделы сохраняет';
 
 /** Комментарии всех автосидируемых версий — по ним отличаем служебные от ручных. */
 function np_seeded_comments(): array {
     return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
             NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
-            NP_PROMPT_V9_COMMENT, NP_PROMPT_STYLE_COMMENT];
+            NP_PROMPT_V9_COMMENT, NP_PROMPT_STYLE_COMMENT, NP_PROMPT_SONNET_COMMENT,
+            NP_PROMPT_STYLE_SONNET_COMMENT];
 }
 
 /** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
@@ -111,7 +117,62 @@ function np_seed_prompts(array $cfg = []): void {
     np_seed_prompts_v8($model, $provider);
     np_seed_prompts_v9($model, $provider);
     np_seed_style_prompt($model, $provider);
+    np_seed_prompts_sonnet($model, $provider);
+    np_seed_style_prompt_sonnet($model, $provider);
     np_heal_seeded_models($model, $provider);
+}
+
+/**
+ * Досидирует поколение «Sonnet» — ОДНОВРЕМЕННО У ВСЕХ ТРЁХ методик. Заказчик
+ * сравнил готовый отчёт (~1100 слов) с тем, что реально дочитывают, и попросил
+ * вдвое короче. Математика, разделы и запреты прежних версий не меняются:
+ * у шкалы вместо двух абзацев один, «Как читать картинки» — одно предложение,
+ * рекомендаций три вместо пяти, итоги и резюме ужаты, а длинный образец
+ * плотности заменён коротким — длинный пример сам учил модель писать длинно.
+ *
+ * Поколение помечено не номером, а словом «Sonnet»: это не «следующая версия
+ * после v9», а отдельная линия, и оператор выбирает её в списке по метке.
+ * Активной она становится по общему правилу — только если сейчас активна
+ * нетронутая автосидированная версия (у СМУ и ИЖС это v6, у Басса-Дарки v9).
+ */
+function np_seed_prompts_sonnet(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    np_seed_prompt_generation(
+        ['smu' => 'smu_sonnet.php', 'lsi' => 'lsi_sonnet.php', 'bd' => 'bd_sonnet.php'],
+        NP_PROMPT_SONNET_COMMENT,
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
+         NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
+         NP_PROMPT_V9_COMMENT],
+        $model, $provider
+    );
+}
+
+/**
+ * Версия «Sonnet» ВТОРОГО СЛОЯ. Пока первый слой писал длинно, второй правил
+ * язык; теперь, когда первый слой сам держит объём, второй дожимает — режет
+ * оставшиеся пересказы и связки. Нижняя граница сжатия названа в самом промпте:
+ * ниже двух третей исходного опускаться нельзя, иначе Interpret::run() отбросит
+ * правку как потерю текста.
+ *
+ * Общий сидинг сюда не подходит: у семейства «style» отсутствие активной версии
+ * означает «слой выключен оператором», а не «надо включить». Поэтому версия
+ * добавляется всегда (оператор увидит её в списке), а активной становится
+ * только вместо нетронутой v1.
+ */
+function np_seed_style_prompt_sonnet(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    $fam = Prompts::family(Interpret::STYLE_KEY);
+    if (!$fam) return;
+    $promptId = (int) $fam['id'];
+    if (Db::one('SELECT id FROM prompt_versions WHERE prompt_id = ? AND comment = ?',
+                [$promptId, NP_PROMPT_STYLE_SONNET_COMMENT])) return;
+    $path = __DIR__ . '/prompts/style_sonnet.php';
+    if (!is_file($path)) return;
+    $body = trim((string) require $path);
+    if ($body === '') return;
+    $versionId = Prompts::addVersion($promptId, $body, $model, $provider, NP_PROMPT_STYLE_SONNET_COMMENT);
+    $active = $fam['active_version_id'] ? Prompts::version((int) $fam['active_version_id']) : null;
+    if ($active !== null && (string) ($active['comment'] ?? '') === NP_PROMPT_STYLE_COMMENT) {
+        Prompts::setActive($promptId, $versionId);
+    }
 }
 
 /**
