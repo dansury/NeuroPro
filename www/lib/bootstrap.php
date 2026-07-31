@@ -47,13 +47,14 @@ const NP_PROMPT_V5_COMMENT = 'v5: глубина отчёта у недорог�
 const NP_PROMPT_V6_COMMENT = 'v6: содержательность вместо многословности — запрет повторов, разделы по методике, язык правит второй слой';
 const NP_PROMPT_V7_COMMENT = 'v7 (Басса-Дарки): описания видов агрессии и четыре группы по матрице — непроявленные перечисляются списком';
 const NP_PROMPT_V8_COMMENT = 'v8 (Басса-Дарки): язык клиента вместо терминов (СМК, каналы, датчики) и запрет повторов — как у СМУ и ИЖС';
+const NP_PROMPT_V9_COMMENT = 'v9 (Басса-Дарки): «Скрытое напряжение» — сейчас условий для проявления нет, но готовность осталась и может вернуться';
 const NP_PROMPT_STYLE_COMMENT = 'Второй слой: литературная правка готового отчёта (язык, краткость; факты не трогает)';
 
 /** Комментарии всех автосидируемых версий — по ним отличаем служебные от ручных. */
 function np_seeded_comments(): array {
     return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
             NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
-            NP_PROMPT_STYLE_COMMENT];
+            NP_PROMPT_V9_COMMENT, NP_PROMPT_STYLE_COMMENT];
 }
 
 /** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
@@ -108,6 +109,7 @@ function np_seed_prompts(array $cfg = []): void {
     np_seed_prompts_v6($model, $provider);
     np_seed_prompts_v7($model, $provider);
     np_seed_prompts_v8($model, $provider);
+    np_seed_prompts_v9($model, $provider);
     np_seed_style_prompt($model, $provider);
     np_heal_seeded_models($model, $provider);
 }
@@ -164,6 +166,26 @@ function np_seed_prompts_v8(string $model = 'yandexgpt', string $provider = 'yan
         NP_PROMPT_V8_COMMENT,
         [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
          NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT],
+        $model, $provider
+    );
+}
+
+/**
+ * Досидирует версию v9 — снова ТОЛЬКО для Басса-Дарки. Раздел «Скрытое
+ * напряжение» (в ответах форма ниже порога, тело откликается) v8 объясняла лишь
+ * через внутреннюю склонность, и клиент читал его как приговор наклонности.
+ * v9 добавляет временной вывод: сейчас условий для проявления этих видов
+ * агрессии нет, но телесная готовность осталась — при стабилизации жизненной
+ * ситуации есть риск снова к ним прибегнуть. Оба вывода обязательны и
+ * проверяются чек-листом промпта. Тот же смысл раздела приходит и в расчёте
+ * (Metrics::CATEGORY_BY_TEST['bd']['hidden']) — математика не меняется.
+ */
+function np_seed_prompts_v9(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    np_seed_prompt_generation(
+        ['bd' => 'bd_v9.php'],
+        NP_PROMPT_V9_COMMENT,
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
+         NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT],
         $model, $provider
     );
 }
