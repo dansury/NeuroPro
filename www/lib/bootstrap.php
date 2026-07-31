@@ -54,13 +54,16 @@ const NP_PROMPT_STYLE_COMMENT = 'Второй слой: литературная
 // по метке, поэтому в комментарии стоит слово «Sonnet», а не «v10».
 const NP_PROMPT_SONNET_COMMENT = 'Sonnet: отчёт вдвое короче — один абзац на шкалу, три рекомендации, сжатые итоги и резюме';
 const NP_PROMPT_STYLE_SONNET_COMMENT = 'Sonnet (второй слой): правка на сжатие — режет воду, факты, шкалы и разделы сохраняет';
+// Поколение «Первый шаг» — то же поколение «Sonnet» плюс последний раздел
+// отчёта: одно конкретное действие на шкале, выбранной расчётом.
+const NP_PROMPT_ACTION_COMMENT = 'Первый шаг: отчёт заканчивается одним конкретным действием на шкале, выбранной расчётом';
 
 /** Комментарии всех автосидируемых версий — по ним отличаем служебные от ручных. */
 function np_seeded_comments(): array {
     return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
             NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
             NP_PROMPT_V9_COMMENT, NP_PROMPT_STYLE_COMMENT, NP_PROMPT_SONNET_COMMENT,
-            NP_PROMPT_STYLE_SONNET_COMMENT];
+            NP_PROMPT_STYLE_SONNET_COMMENT, NP_PROMPT_ACTION_COMMENT];
 }
 
 /** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
@@ -119,6 +122,7 @@ function np_seed_prompts(array $cfg = []): void {
     np_seed_style_prompt($model, $provider);
     np_seed_prompts_sonnet($model, $provider);
     np_seed_style_prompt_sonnet($model, $provider);
+    np_seed_prompts_action($model, $provider);
     np_heal_seeded_models($model, $provider);
 }
 
@@ -142,6 +146,29 @@ function np_seed_prompts_sonnet(string $model = 'yandexgpt', string $provider = 
         [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
          NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
          NP_PROMPT_V9_COMMENT],
+        $model, $provider
+    );
+}
+
+/**
+ * Досидирует поколение «Первый шаг» — ОДНОВРЕМЕННО У ВСЕХ ТРЁХ методик. Отчёт
+ * заканчивался тремя рекомендациями-направлениями, и заказчик попросил, чтобы
+ * в конце стояло одно конкретное действие: с чего начать сегодня. Все прежние
+ * требования поколения «Sonnet» сохранены, добавлен только последний раздел
+ * «С чего начать» (и потолок объёма поднят ровно на него).
+ *
+ * ШКАЛУ ДЛЯ ЭТОГО ДЕЙСТВИЯ ВЫБИРАЕТ РАСЧЁТ, а не модель: Metrics::firstStep()
+ * берёт самый достоверный телесный отклик и самую тяжёлую тему профиля, а
+ * Interpret::buildUserMessage() передаёт готовый выбор блоком «С ЧЕГО НАЧАТЬ»
+ * (Конституция, принцип I).
+ */
+function np_seed_prompts_action(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    np_seed_prompt_generation(
+        ['smu' => 'smu_action.php', 'lsi' => 'lsi_action.php', 'bd' => 'bd_action.php'],
+        NP_PROMPT_ACTION_COMMENT,
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
+         NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
+         NP_PROMPT_V9_COMMENT, NP_PROMPT_SONNET_COMMENT],
         $model, $provider
     );
 }
