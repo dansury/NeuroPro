@@ -5,12 +5,13 @@
  * Диаграмма-паутинка показывает профиль по осям-шкалам, но не показывает
  * ГЛАВНОГО соотношения: насколько ответы теста совпадают с телесной реакцией.
  * Матрица кладёт каждый показатель в плоскость:
- *   - ось X — когнитивный ответ (ответы теста) в единицах самого теста:
+ *   - ось ординат (вертикальная) — результаты теста в единицах самого теста:
  *     у СМУ это баллы 0…10, у ИЖС — проценты, у Басса-Дарки шкалы имеют разные
  *     максимумы (5…13), поэтому единственная сравнимая подпись — процент от
- *     максимума своей шкалы (см. Metrics::unit());
- *   - ось Y — эмоциональный ответ: «Знач.» из таблицы смысло-эмоциональной
- *     значимости Эгоскопа на симметричной шкале ±phys_scale, медиана — по центру.
+ *     максимума своей шкалы (см. Metrics::unit()); выше — результат сильнее;
+ *   - ось абсцисс (горизонтальная) — телесный отклик: «Знач.» из таблицы
+ *     смысло-эмоциональной значимости Эгоскопа на симметричной шкале
+ *     ±phys_scale, медиана — по центру, правее — отклик сильнее.
  *
  * Кружок = показатель. Как он выглядит, решает одна таблица — bubbleStyle():
  *   - тело откликается выше медианы → кружок разделён на секторы СМК (Y —
@@ -119,8 +120,10 @@ final class Matrix {
 
         $padL = 62; $padR = 26; $padT = 46;
         $plotW = $W - $padL - $padR;
-        // Без физиологии вертикальной оси нет — незачем оставлять пустое поле.
-        $plotH = (int) round($plotW * ($hasPhys ? 0.62 : 0.28));
+        // Вертикальная ось — результаты теста, они есть всегда (в отличие от
+        // телесного отклика, который иногда не распознан), поэтому высота
+        // площадки больше не зависит от наличия физиологии.
+        $plotH = (int) round($plotW * 0.62);
         // Пояснений под матрицей больше нет: расшифровки цветов, пунктира и
         // обводки заказчик просил убрать — всё, что нужно, читается по легенде
         // (#4). Освободившееся место отдано самой картинке.
@@ -135,11 +138,13 @@ final class Matrix {
         $padB = 34 + $legendRows * 15 + 8;
         $H = $padT + $plotH + $padB;
 
-        // Когниция: 0…100 % слева направо. Физиология: +phys_scale сверху,
-        // −phys_scale снизу, медиана — точно по центру области.
+        // Результаты теста — по вертикали: 0 % снизу, 100 % сверху (выше —
+        // сильнее выражено в ответах). Телесный отклик — по горизонтали:
+        // −phys_scale слева, +phys_scale справа, медиана — точно по центру
+        // области (правее — телесный отклик сильнее).
         $x = static fn (float $pct) => $padL + $plotW * max(0.0, min(100.0, $pct)) / 100.0;
         $y = static fn (float $pct) => $padT + $plotH * (1.0 - max(0.0, min(100.0, $pct)) / 100.0);
-        $yZna = static fn (float $zna) => $y(50.0 + 50.0 * $zna / ($physScale ?: 1.0));
+        $xZna = static fn (float $zna) => $x(50.0 + 50.0 * $zna / ($physScale ?: 1.0));
 
         $s = [];
         // Геометрия площадки — в data-атрибутах корня: интерактивный слой
@@ -161,70 +166,71 @@ final class Matrix {
              . self::esc($title) . '</text>';
         $s[] = '<rect x="' . $padL . '" y="' . $padT . '" width="' . $plotW . '" height="' . $plotH . '" fill="#fbfcfd" stroke="' . self::AXIS . '"/>';
 
-        // Сетка и подписи оси X — в единицах самого теста.
+        // Сетка и подписи оси ординат (вертикальной) — результаты теста, в
+        // единицах самого теста. Выше — сильнее выражено в ответах.
         $unitMax = (float) ($unit['max'] ?? 100.0);
         $suffix = (string) ($unit['suffix'] ?? '%');
         for ($p = 0; $p <= 100; $p += 20) {
-            $px = round($x((float) $p), 1);
+            $py = round($y((float) $p), 1);
             if ($p > 0 && $p < 100) {
-                $s[] = '<line x1="' . $px . '" y1="' . $padT . '" x2="' . $px . '" y2="' . ($padT + $plotH) . '" stroke="' . self::GRID . '"/>';
+                $s[] = '<line x1="' . $padL . '" y1="' . $py . '" x2="' . ($padL + $plotW) . '" y2="' . $py . '" stroke="' . self::GRID . '"/>';
             }
             $label = Metrics::num($unitMax * $p / 100.0) . ($suffix === '%' ? ' %' : '');
-            $s[] = '<text x="' . $px . '" y="' . ($padT + $plotH + 14) . '" text-anchor="middle" font-size="9" fill="' . self::DIM . '">'
+            $s[] = '<text x="' . ($padL - 6) . '" y="' . ($py + 3.2) . '" text-anchor="end" font-size="9" fill="' . self::DIM . '">'
                  . self::esc($label) . '</text>';
         }
-        $s[] = '<text x="' . round($padL + $plotW / 2) . '" y="' . ($padT + $plotH + 30) . '" text-anchor="middle" font-size="10.5" fill="' . self::TEXT . '">'
-             . self::esc('Когнитивный показатель — ответы теста (' . $unit['title'] . ')') . '</text>';
+        $s[] = '<text x="16" y="' . round($padT + $plotH / 2) . '" font-size="10.5" fill="' . self::TEXT
+             . '" transform="rotate(-90 16 ' . round($padT + $plotH / 2) . ')" text-anchor="middle">'
+             . self::esc('Результаты теста') . '</text>';
 
-        // Сетка и подписи оси Y — в единицах «Знач.» Эгоскопа.
+        // Сетка и подписи оси абсцисс (горизонтальной) — телесный отклик, в
+        // единицах «Знач.» Эгоскопа. Правее — телесный отклик сильнее.
         if ($hasPhys) {
             foreach ([1.0, 0.5, 0.0, -0.5, -1.0] as $k) {
                 $zna = $physScale * $k;
-                $py = round($yZna($zna), 1);
+                $px = round($xZna($zna), 1);
                 if ($k !== 1.0 && $k !== -1.0 && $k !== 0.0) {
-                    $s[] = '<line x1="' . $padL . '" y1="' . $py . '" x2="' . ($padL + $plotW) . '" y2="' . $py . '" stroke="' . self::GRID . '"/>';
+                    $s[] = '<line x1="' . $px . '" y1="' . $padT . '" x2="' . $px . '" y2="' . ($padT + $plotH) . '" stroke="' . self::GRID . '"/>';
                 }
-                $s[] = '<text x="' . ($padL - 6) . '" y="' . ($py + 3.2) . '" text-anchor="end" font-size="9" fill="' . self::DIM . '">'
+                $s[] = '<text x="' . $px . '" y="' . ($padT + $plotH + 14) . '" text-anchor="middle" font-size="9" fill="' . self::DIM . '">'
                      . self::esc(Metrics::num($zna)) . '</text>';
             }
-            $s[] = '<text x="16" y="' . round($padT + $plotH / 2) . '" font-size="10.5" fill="' . self::TEXT
-                 . '" transform="rotate(-90 16 ' . round($padT + $plotH / 2) . ')" text-anchor="middle">'
-                 . self::esc('Эмоциональный показатель — «Знач.»') . '</text>';
+            $s[] = '<text x="' . round($padL + $plotW / 2) . '" y="' . ($padT + $plotH + 30) . '" text-anchor="middle" font-size="10.5" fill="' . self::TEXT . '">'
+                 . self::esc('Телесный отклик') . '</text>';
         } else {
-            $s[] = '<text x="16" y="' . round($padT + $plotH / 2) . '" font-size="10.5" fill="' . self::DIM
-                 . '" transform="rotate(-90 16 ' . round($padT + $plotH / 2) . ')" text-anchor="middle">'
-                 . self::esc('Эмоциональный показатель — нет данных') . '</text>';
+            $s[] = '<text x="' . round($padL + $plotW / 2) . '" y="' . ($padT + $plotH + 30) . '" text-anchor="middle" font-size="10.5" fill="' . self::DIM . '">'
+                 . self::esc('Телесный отклик — нет данных') . '</text>';
         }
 
         // Пороги: бледный пунктир, по которому код отсекает средние показатели
-        // от высоких (когниция) и телесный отклик от его отсутствия (физиология).
-        // На странице результата этот пунктир можно таскать мышью — отсюда
-        // классы и подписи со значением (интерактив живёт в interactiveHtml).
+        // от высоких (результаты теста) и телесный отклик от его отсутствия
+        // (физиология). На странице результата этот пунктир можно таскать
+        // мышью — отсюда классы и подписи со значением (interactiveHtml).
         foreach ([['low', $lowPct], ['high', $highPct]] as [$key, $pct]) {
-            $px = round($x($pct), 1);
-            $s[] = '<g class="mx-thr mx-thr-v" data-key="' . $key . '">'
-                 . '<line class="mx-thr-hit" x1="' . $px . '" y1="' . $padT . '" x2="' . $px . '" y2="' . ($padT + $plotH)
+            $py = round($y($pct), 1);
+            $s[] = '<g class="mx-thr mx-thr-h" data-key="' . $key . '">'
+                 . '<line class="mx-thr-hit" x1="' . $padL . '" y1="' . $py . '" x2="' . ($padL + $plotW) . '" y2="' . $py
                  . '" stroke="transparent" stroke-width="10"/>'
-                 . '<line class="mx-thr-line" x1="' . $px . '" y1="' . $padT . '" x2="' . $px . '" y2="' . ($padT + $plotH)
+                 . '<line class="mx-thr-line" x1="' . $padL . '" y1="' . $py . '" x2="' . ($padL + $plotW) . '" y2="' . $py
                  . '" stroke="' . self::DASH . '" stroke-width="1.2" stroke-dasharray="4 4"/>'
-                 . '<text class="mx-thr-val" x="' . ($px + 3) . '" y="' . ($padT + 10) . '" font-size="8.5" fill="' . self::DIM . '">'
-                 . self::esc(Metrics::num($pct) . ' %') . '</text></g>';
+                 . '<text class="mx-thr-val" x="' . ($padL + $plotW - 3) . '" y="' . ($py - 3) . '" text-anchor="end" font-size="8.5" fill="'
+                 . self::DIM . '">' . self::esc(Metrics::num($pct) . ' %') . '</text></g>';
         }
         if ($hasPhys) {
             foreach ([['band+', $midBand], ['band-', -$midBand]] as [$key, $zna]) {
-                $py = round($yZna($zna), 1);
-                $s[] = '<g class="mx-thr mx-thr-h" data-key="' . $key . '">'
-                     . '<line class="mx-thr-hit" x1="' . $padL . '" y1="' . $py . '" x2="' . ($padL + $plotW) . '" y2="' . $py
+                $px = round($xZna($zna), 1);
+                $s[] = '<g class="mx-thr mx-thr-v" data-key="' . $key . '">'
+                     . '<line class="mx-thr-hit" x1="' . $px . '" y1="' . $padT . '" x2="' . $px . '" y2="' . ($padT + $plotH)
                      . '" stroke="transparent" stroke-width="10"/>'
-                     . '<line class="mx-thr-line" x1="' . $padL . '" y1="' . $py . '" x2="' . ($padL + $plotW) . '" y2="' . $py
+                     . '<line class="mx-thr-line" x1="' . $px . '" y1="' . $padT . '" x2="' . $px . '" y2="' . ($padT + $plotH)
                      . '" stroke="' . self::DASH . '" stroke-width="1.2" stroke-dasharray="4 4"/>'
-                     . '<text class="mx-thr-val" x="' . ($padL + $plotW - 3) . '" y="' . ($py - 3) . '" text-anchor="end" font-size="8.5" fill="'
-                     . self::DIM . '">' . self::esc(Metrics::num($zna)) . '</text></g>';
+                     . '<text class="mx-thr-val" x="' . ($px + 3) . '" y="' . ($padT + 10) . '" font-size="8.5" fill="' . self::DIM . '">'
+                     . self::esc(Metrics::num($zna)) . '</text></g>';
             }
-            $py0 = round($yZna(0.0), 1);
-            $s[] = '<line x1="' . $padL . '" y1="' . $py0 . '" x2="' . ($padL + $plotW) . '" y2="' . $py0
+            $px0 = round($xZna(0.0), 1);
+            $s[] = '<line x1="' . $px0 . '" y1="' . $padT . '" x2="' . $px0 . '" y2="' . ($padT + $plotH)
                  . '" stroke="' . self::MEDIAN . '" stroke-width="1.3" stroke-dasharray="6 4"/>';
-            $s[] = '<text x="' . ($padL + 4) . '" y="' . ($py0 - 4) . '" font-size="9" fill="' . self::MEDIAN . '">медиана</text>';
+            $s[] = '<text x="' . ($px0 + 4) . '" y="' . ($padT + 10) . '" font-size="9" fill="' . self::MEDIAN . '">медиана</text>';
         }
 
         // Кружки. Без физиологии все точки честно лежат на линии «нет данных»:
@@ -237,8 +243,8 @@ final class Matrix {
         // (vector-effect="non-scaling-stroke").
         $points = [];
         foreach ($axes as $a) {
-            $px = $x((float) $a['cog_pct']);
-            $py = $hasPhys && $a['phys_pct'] !== null ? $y((float) $a['phys_pct']) : $padT + $plotH / 2.0;
+            $py = $y((float) $a['cog_pct']);
+            $px = $hasPhys && $a['phys_pct'] !== null ? $x((float) $a['phys_pct']) : $padL + $plotW / 2.0;
             $r = self::radius((float) $a['weight'], $contrast, $wMin, $wMax);
             $points[] = ['a' => $a, 'x0' => $px, 'y0' => $py, 'x' => $px, 'y' => $py, 'r' => $r,
                          'nodata' => $hasPhys && $a['phys_pct'] === null];
@@ -611,14 +617,16 @@ final class Matrix {
     svg.querySelectorAll('.mx-thr').forEach(function(g){
       var k=g.dataset.key, val=g.querySelector('.mx-thr-val');
       if(k==='low'||k==='high'){
-        var px=padL+plotW*Math.max(0,Math.min(100,st[k]))/100;
-        g.querySelectorAll('line').forEach(function(l){ l.setAttribute('x1',num(px)); l.setAttribute('x2',num(px)); });
-        val.setAttribute('x', num(px+3)); val.textContent=num(st[k])+' %';
-      } else if(physScale>0){
-        var z=(k==='band+'?1:-1)*band(),
-            py=padT+plotH*(0.5-0.5*z/physScale);
+        // Результаты теста — вертикальная ось: 0 % снизу, 100 % сверху (зеркало $y()).
+        var py=padT+plotH*(1-Math.max(0,Math.min(100,st[k]))/100);
         g.querySelectorAll('line').forEach(function(l){ l.setAttribute('y1',num(py)); l.setAttribute('y2',num(py)); });
-        val.setAttribute('y', num(py-3)); val.textContent=num(z);
+        val.setAttribute('y', num(py-3)); val.textContent=num(st[k])+' %';
+      } else if(physScale>0){
+        // Телесный отклик — горизонтальная ось: медиана по центру (зеркало $xZna()).
+        var z=(k==='band+'?1:-1)*band(),
+            px=padL+plotW*(0.5+0.5*z/physScale);
+        g.querySelectorAll('line').forEach(function(l){ l.setAttribute('x1',num(px)); l.setAttribute('x2',num(px)); });
+        val.setAttribute('x', num(px+3)); val.textContent=num(z);
       }
     });
   }
@@ -634,9 +642,14 @@ final class Matrix {
         .then(function(r){ return r.json(); })
         .then(function(d){
           if(!d.ok) throw new Error(d.error||'не удалось сохранить');
-          // Пороги решают не только цвет кружка, но и раздел отчёта, поэтому
-          // предлагаем пересчитать страницу, а не делаем это молча посреди правки.
-          state.innerHTML='Сохранено. <a href="">Пересчитать разделы</a>';
+          // Пороги решают не только цвет кружка, но и раздел отчёта в таблице
+          // ниже — она рисуется на сервере, поэтому её саму по себе не
+          // перекрасить. Раньше страница ждала, что оператор заметит и нажмёт
+          // ссылку «Пересчитать»; теперь перезагружаем сами, как только правка
+          // на 500 мс затихла (тот же debounce, что и у самого сохранения) —
+          // раздел отчёта в таблице обновляется без лишнего клика.
+          state.textContent='Сохранено, обновляю раздел отчёта…';
+          location.reload();
         })
         .catch(function(e){ state.textContent='Не сохранено: '+e.message; });
     }, 500);
@@ -673,10 +686,12 @@ final class Matrix {
       var move=function(ev){
         var ux=(ev.clientX-box.left)/scale, uy=(ev.clientY-box.top)/scale;
         if(k==='low'||k==='high'){
-          st[k]=Math.max(1, Math.min(99, (ux-padL)/plotW*100));
+          // Результаты теста — вертикальная ось, тянем по uy (зеркало $y()).
+          st[k]=Math.max(1, Math.min(99, (padT+plotH-uy)/plotH*100));
           if(k==='low') st.low=Math.min(st.low, st.high-1); else st.high=Math.max(st.high, st.low+1);
         } else {
-          var z=(padT+plotH/2-uy)/(plotH/2)*physScale;
+          // Телесный отклик — горизонтальная ось, тянем по ux (зеркало $xZna()).
+          var z=(ux-(padL+plotW/2))/(plotW/2)*physScale;
           st.band=Math.max(0, Math.min(50, Math.abs(z)/physScale*100));
         }
         drawLines(); paint();
@@ -779,6 +794,20 @@ final class Matrix {
     ];
 
     /**
+     * Цвет по букве доминирующего параметра СМК (или C_NONE, если параметр не
+     * распознан) — публичный, чтобы диаграмма (Chart) красила точку телесного
+     * отклика при наведении ровно теми же цветами, что и матрица (#4).
+     */
+    public static function colorForLetter(string $letter): string {
+        return match ($letter) {
+            'Y' => self::C_Y,
+            'X' => self::C_X,
+            'Z' => self::C_Z,
+            default => self::C_NONE,
+        };
+    }
+
+    /**
      * Секторы кружка по порядку СМК: первый параметр — самый большой сектор.
      * Доли по рангу наглядно показывают преобладание, при этом кружок честно
      * разделён между НАЗВАННЫМИ параметрами. Возвращает пары [path, color].
@@ -787,9 +816,12 @@ final class Matrix {
      * ставит transform="translate(cx cy) scale(r)" у группы кружка, поэтому смена
      * контраста размеров не требует пересчёта секторов.
      *
+     * Публичный: диаграмма (Chart) переиспользует его для цветовой разбивки
+     * точки телесного отклика при наведении (#4) — те же секторы, что на матрице.
+     *
      * @return array<int, array{0:string,1:string}>
      */
-    private static function sectorPaths(string $smk): array {
+    public static function sectorPaths(string $smk): array {
         $order = self::smkOrder($smk);
         if ($order === []) return [];
         $weights = self::SECTOR_WEIGHTS[count($order)] ?? self::SECTOR_WEIGHTS[3];

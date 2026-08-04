@@ -27,6 +27,9 @@
  */
 
 require_once __DIR__ . '/metrics.php';
+// Секторы кружка (Matrix::sectorPaths) — точка телесного отклика при наведении
+// красится ровно теми же цветами СМК, что и матрица (#4), одной таблицей.
+require_once __DIR__ . '/matrix.php';
 
 final class Chart {
     // Ответы теста — синие, физиологический ответ — оранжевый (по просьбе
@@ -53,7 +56,7 @@ final class Chart {
      * нормировка, шкала физиологии и достоверность уже посчитаны там.
      */
     public static function fromMetrics(array $metrics, array $opts = []): string {
-        $labels = $cog = $physVals = $sig = $scores = [];
+        $labels = $cog = $physVals = $sig = $scores = $smk = [];
         // Единицы когнитивной оси — «как в самом тесте»: у ИЖС это проценты, у
         // СМУ баллы 0…10, у Басса-Дарки максимумы шкал разные, поэтому балл без
         // своего максимума не читается.
@@ -64,6 +67,7 @@ final class Chart {
             $cog[]      = $a['pct'];                 // уже % от максимума своей шкалы
             $physVals[] = $a['zna'];
             $sig[]      = $a['sig'];
+            $smk[]      = (string) ($a['smk'] ?? '');
             // Результат теста у подписи оси — для ЛЮБОЙ методики, а не только у
             // ИЖС, где он совпадал с процентом на кольцах (#3).
             $scores[]   = ($metrics['test_key'] ?? '') === 'lsi'
@@ -75,6 +79,7 @@ final class Chart {
         return self::render($labels, $cog, $physVals, $sig, $opts + [
             'phys_scale' => $metrics['phys_scale'] ?? 0.0,
             'axis_values' => $scores,
+            'smk' => $smk,
         ]);
     }
 
@@ -131,9 +136,15 @@ final class Chart {
             return [$cx + $R * $frac * cos($a), $cy + $R * $frac * sin($a)];
         };
 
+        // Легенда получает СВОЮ полосу высоты под картинкой, а не делит место
+        // с диаграммой: раньше подпись нижней оси и первая строка легенды
+        // считались от одного и того же $size и на уменьшенных картинках
+        // накладывались друг на друга (#5).
+        $legendPad = 24;
+        $imgH = $size + $legendPad;
         $svg = [];
-        $svg[] = '<svg xmlns="http://www.w3.org/2000/svg" width="' . $size . '" height="' . $size . '" '
-               . 'viewBox="0 0 ' . $size . ' ' . $size . '" font-family="Verdana, Geneva, sans-serif">';
+        $svg[] = '<svg xmlns="http://www.w3.org/2000/svg" width="' . $size . '" height="' . $imgH . '" '
+               . 'viewBox="0 0 ' . $size . ' ' . $imgH . '" font-family="Verdana, Geneva, sans-serif">';
         $svg[] = '<rect width="100%" height="100%" fill="#ffffff"/>';
         if ($title !== '') {
             $svg[] = '<text x="' . $cx . '" y="26" text-anchor="middle" font-size="16" font-weight="bold" fill="' . self::TEXT . '">' . self::esc($title) . '</text>';
@@ -173,8 +184,9 @@ final class Chart {
         }
 
         // Physiological overlay first (drawn under cognitive so the line reads on top).
-        $physPts = [];   // [axisIdx => [x, y, value, significant]]
+        $physPts = [];   // [axisIdx => [x, y, value, significant, smk]]
         $hasPhys = false;
+        $smkByAxis = (array) ($opts['smk'] ?? []);
         if ($physScale > 0) {
             for ($i = 0; $i < $n; $i++) {
                 $v = $phys[$i] ?? null;
@@ -182,7 +194,7 @@ final class Chart {
                 // Медиана (0) — на кольце 50 %, ±phys_scale — край и центр.
                 $frac = max(0.02, min(1.0, 0.5 + 0.5 * ((float) $v / $physScale)));
                 [$x, $y] = $pt($i, $frac);
-                $physPts[$i] = [$x, $y, (float) $v, !empty($sig[$i])];
+                $physPts[$i] = [$x, $y, (float) $v, !empty($sig[$i]), (string) ($smkByAxis[$i] ?? '')];
             }
             $hasPhys = count($physPts) > 0;
         }
@@ -194,10 +206,33 @@ final class Chart {
             $svg[] = '<text x="' . round($cx - $R * 0.5 + 4) . '" y="' . round($cy - 5) . '" font-size="9" fill="'
                    . self::MEDIAN . '">медиана</text>';
             $svg[] = self::physShape($physPts, $n);
-            foreach ($physPts as $i => [$x, $y, $v, $isSig]) {
+            foreach ($physPts as $i => [$x, $y, $v, $isSig, $ptSmk]) {
                 // Точка: при p<0.05 — заметно жирнее (крупнее + обводка).
                 $r = $isSig ? 6.0 : 3.6;
-                $svg[] = '<circle cx="' . round($x, 1) . '" cy="' . round($y, 1) . '" r="' . $r . '" fill="' . self::PHYS_STROKE . '" stroke="#ffffff" stroke-width="' . ($isSig ? '2' : '1.2') . '"/>';
+                // При наведении точка укрупняется и красится по составу СМК —
+                // ровно теми же секторами и цветами, что кружок на матрице
+                // (Matrix::sectorPaths), а не отдельной палитрой (#4).
+                $hoverR = $r * 2.0;
+                $sectors = Matrix::sectorPaths($ptSmk);
+                $cxp = round($x, 1); $cyp = round($y, 1);
+                $svg[] = '<g class="np-phys-pt">';
+                $svg[] = '<circle class="np-pt-hit" cx="' . $cxp . '" cy="' . $cyp . '" r="' . max($hoverR + 4, 11) . '" fill="transparent"/>';
+                $svg[] = '<circle class="np-pt-plain" cx="' . $cxp . '" cy="' . $cyp . '" r="' . $r . '" fill="' . self::PHYS_STROKE
+                       . '" stroke="#ffffff" stroke-width="' . ($isSig ? '2' : '1.2') . '"/>';
+                $svg[] = '<g class="np-pt-hover" transform="translate(' . $cxp . ' ' . $cyp . ') scale(' . round($hoverR, 2) . ')">';
+                if ($sectors) {
+                    foreach ($sectors as [$path, $col]) {
+                        $svg[] = '<path d="' . $path . '" fill="' . $col . '" fill-opacity="0.92" stroke="#ffffff"'
+                               . ' stroke-width="0.6" vector-effect="non-scaling-stroke"/>';
+                    }
+                } else {
+                    // СМК не распознан — фиолетовый, как на матрице (Matrix::C_NONE):
+                    // отсутствие данных не должно читаться как ещё один канал.
+                    $svg[] = '<circle cx="0" cy="0" r="1" fill="' . Matrix::colorForLetter('') . '"/>';
+                }
+                $svg[] = '<circle cx="0" cy="0" r="1" fill="none" stroke="#ffffff" stroke-width="' . ($isSig ? '0.12' : '0.08') . '" vector-effect="non-scaling-stroke"/>';
+                $svg[] = '</g>';
+                $svg[] = '</g>';
                 // Подпись Знач. — со смещением ВБОК от оси (по касательной), а не
                 // вдоль неё: когнитивная точка всегда лежит на самой оси, и
                 // радиальная подпись наезжала на неё, когда кривые сближались.
@@ -205,8 +240,14 @@ final class Chart {
                 $tx = $x + 9 * cos($a) - 14 * sin($a);
                 $ty = $y + 9 * sin($a) + 14 * cos($a) + 4;
                 $svg[] = '<text x="' . round($tx, 1) . '" y="' . round($ty, 1) . '" text-anchor="middle" font-size="' . ($isSig ? '12' : '10') . '"'
-                       . ($isSig ? ' font-weight="bold"' : '') . ' fill="' . self::PHYS_TEXT . '">' . self::num($v) . '</text>';
+                       . ($isSig ? ' font-weight="bold"' : '') . ' fill="' . self::PHYS_TEXT . '" pointer-events="none">' . self::num($v) . '</text>';
             }
+            $svg[] = '<style>'
+                   . '.np-phys-pt{cursor:pointer}'
+                   . '.np-pt-hover{opacity:0;pointer-events:none}'
+                   . '.np-phys-pt:hover .np-pt-hover{opacity:1}'
+                   . '.np-phys-pt:hover .np-pt-plain{opacity:0}'
+                   . '</style>';
         }
 
         // Cognitive polygon (в процентах от максимума своей шкалы).
@@ -257,7 +298,7 @@ final class Chart {
             $fs = $try;
             if ($width($items, $try, $sq, $gap) <= $avail) break;
         }
-        $ly = $size - 5 - count($noteLines) * 11 - 5;
+        $ly = $imgH - 5 - count($noteLines) * 11 - 5;
         $sqY = $ly - $sq + 2;     // низ квадрата совпадает с базовой линией текста
         $lx = max(6.0, $cx - $width($items, $fs, $sq, $gap) / 2);
         foreach ($items as [$label, $color, $opacity]) {
@@ -268,7 +309,7 @@ final class Chart {
             $lx += $sq + 6 + self::textW($label, $fs) + $gap;
         }
         foreach ($noteLines as $k => $line) {
-            $svg[] = '<text x="' . $cx . '" y="' . round($size - 5 - (count($noteLines) - 1 - $k) * 11, 1)
+            $svg[] = '<text x="' . $cx . '" y="' . round($imgH - 5 - (count($noteLines) - 1 - $k) * 11, 1)
                    . '" text-anchor="middle" font-size="9" fill="#8a949d">' . self::esc($line) . '</text>';
         }
 
