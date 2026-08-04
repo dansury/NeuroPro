@@ -46,15 +46,15 @@ final class Report {
             ? Metrics::withConf($conf, static fn () => Metrics::build($profile, $phys))
             : Metrics::build($profile, $phys);
         // Диаграмма и матрица должны уместиться на ОДИН лист PDF, поэтому обе
-        // уменьшены примерно на треть от прежних 600/620 px, а пояснения под
-        // матрицей сжаты (compact). Раньше картинки занимали два листа, и клиент
-        // видел половину соотношения на одной странице, половину — на другой.
+        // уменьшены примерно на треть от прежних 600/620 px, а затем — ещё на
+        // 10% (360/387 px): у СМУ с 12 шкалами картинки по-прежнему съезжали
+        // на второй лист. Пояснения под матрицей сжаты (compact).
         $svg = Chart::fromMetrics($metrics, [
             'title' => Profile::chartTitle((string) ($profile['test_key'] ?? '')),
-            'size'  => 400,
+            'size'  => 360,
         ]);
         // Матрица под диаграммой — она заменила таблицы отчёта.
-        $matrix = Matrix::svg($metrics, ['width' => 430]);
+        $matrix = Matrix::svg($metrics, ['width' => 387]);
 
         $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
         $title = $h(($profile['name'] ?: 'Профиль') . ' — ' . ($profile['methodic'] ?: ''));
@@ -98,10 +98,14 @@ final class Report {
      первая страница, разбор — со второй. Раньше заголовок «… — интерпретация
      теста …» дописывался под матрицей и разрывался между листами как придётся. */
   .interp { margin-top: 8px; page-break-before: always; break-before: page; }
-  .interp h1, .interp h2, .interp h3 { color: #b3203b; font-size: 14px; margin: 16px 0 6px; }
-  /* Подзаголовок шкалы (#### Название) — тот же красный, но мельче: модель
-     ставит его перед разбором каждого показателя. */
-  .interp h4, .interp h5, .interp h6 { color: #b3203b; font-size: 12.5px; margin: 12px 0 4px; }
+  /* h1/h2 — заголовок отчёта и разделы («## Сильные мотиваторы»): крупнее и с
+     чертой снизу, чтобы раздел был виден с первого взгляда, даже бегло листая
+     страницы. h3 — подзаголовок шкалы («### Название шкалы») внутри раздела:
+     заметно мельче h2 и без черты — раньше оба уровня рисовались одним и тем
+     же стилем 14px и визуально не различались. */
+  .interp h1, .interp h2 { color: #b3203b; font-size: 16px; margin: 18px 0 8px; border-bottom: 1px solid #e6c3cb; padding-bottom: 3px; }
+  .interp h3 { color: #b3203b; font-size: 13px; margin: 12px 0 4px; }
+  .interp h4, .interp h5, .interp h6 { color: #b3203b; font-size: 12px; margin: 10px 0 3px; }
   .interp h1:first-child, .interp h2:first-child, .interp h3:first-child { margin-top: 0; }
   .interp p { margin: 6px 0; }
   .interp table { border-collapse: collapse; font-size: 11px; margin: 8px 0; }
@@ -182,80 +186,19 @@ final class Report {
     }
 
     /**
-     * ─── Правка интерпретации по абзацам ───────────────────────────────────
+     * ─── Правка интерпретации ───────────────────────────────────────────────
      *
-     * Отчёт правится ДО выгрузки в PDF: оператор двойным кликом открывает абзац
-     * и переписывает его. Единица правки — блок Markdown (абзац, заголовок или
-     * список), а не HTML: в базе лежит текст нейросети, и правка должна остаться
-     * тем же текстом, иначе следующий PDF собрать уже нечем.
-     *
-     * Нумерация блоков одинакова при показе и при сохранении, потому что оба
-     * пути начинаются с normalizeForEdit(): без этого удалённая таблица от
-     * модели сдвигала индексы, и правка уходила не в тот абзац.
+     * Отчёт правится ДО выгрузки в PDF: двойной клик по тексту на странице
+     * результата открывает ОДИН общий Markdown-редактор на весь текст (курсор —
+     * там, где кликнули), клик за его пределами сохраняет правку автоматически.
+     * Правки построчно по отдельным абзацам сервис больше не поддерживает —
+     * переставить разделы или переписать отчёт целиком было нельзя (#6).
      */
 
     /** Канонический вид текста для правки: без таблиц модели, без лишних пустых строк. */
     public static function normalizeForEdit(string $md): string {
         $text = str_replace("\r\n", "\n", self::stripTables($md));
         return trim((string) preg_replace('/\n{3,}/', "\n\n", $text));
-    }
-
-    /**
-     * Блоки Markdown — по одному на правку. Кроме пустых строк режем и по
-     * заголовкам: модель часто пишет заголовок и абзац без пустой строки между
-     * ними, а править заголовок вместе с текстом неудобно. Список остаётся одним
-     * блоком: разбитый по пунктам, он при сборке превратился бы в несколько
-     * списков подряд.
-     */
-    public static function editBlocks(string $md): array {
-        $norm = self::normalizeForEdit($md);
-        if ($norm === '') return [];
-        $out = [];
-        foreach (preg_split('/\n[ \t]*\n/', $norm) ?: [] as $chunk) {
-            $rest = [];
-            foreach (preg_split('/\n/', trim($chunk)) as $line) {
-                if (preg_match('/^#{1,6}\s+\S/', $line)) {
-                    if ($rest) { $out[] = implode("\n", $rest); $rest = []; }
-                    $out[] = trim($line);
-                    continue;
-                }
-                $rest[] = $line;
-            }
-            if ($rest) $out[] = implode("\n", $rest);
-        }
-        return array_values(array_filter(array_map('trim', $out), static fn ($b) => $b !== ''));
-    }
-
-    /**
-     * Заменяет один блок. Пустой текст = удалить абзац (оператор так убирает
-     * лишнее). Возвращает новый полный текст интерпретации.
-     */
-    public static function replaceBlock(string $md, int $index, string $newText): string {
-        $blocks = self::editBlocks($md);
-        if (!array_key_exists($index, $blocks)) {
-            throw new RuntimeException('Абзац не найден: текст изменился, обновите страницу.');
-        }
-        $new = trim(str_replace("\r\n", "\n", $newText));
-        if ($new === '') unset($blocks[$index]);
-        else $blocks[$index] = $new;
-        return implode("\n\n", array_values($blocks));
-    }
-
-    /**
-     * Интерпретация для страницы результата: каждый блок обёрнут в контейнер с
-     * номером и исходным Markdown, чтобы правка открывалась ровно тем текстом,
-     * который лежит в базе.
-     */
-    public static function interpToEditableHtml(string $md): string {
-        $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-        $out = [];
-        foreach (self::editBlocks($md) as $i => $block) {
-            $out[] = '<div class="np-block" data-block="' . $i . '" data-src="' . $h($block)
-                   . '" title="Двойной клик — редактировать">' . self::mdToHtml($block) . '</div>';
-        }
-        if (!$out) $out[] = '<div class="np-block" data-block="0" data-src="">'
-                          . '<p class="muted">Текст пуст.</p></div>';
-        return implode("\n", $out);
     }
 
     /** Убирает Markdown-таблицы (и их заголовок, если он остался пустым). */

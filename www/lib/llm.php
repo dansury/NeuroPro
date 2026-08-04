@@ -421,6 +421,110 @@ final class LLM {
      */
     public static function recognizeSignificance(string $imageBytes, string $mime, array $labels): array {
         $cfg = self::cfg();
+        $labels = array_values($labels);
+
+        // РЕЗКА КАРТИНКИ НА ЧАСТИ (#2). Скриншот со СМУ несёт 12 строк
+        // мелкого текста в одном изображении; модель сжимает его целиком до
+        // своего рабочего разрешения, и на строку остаётся мало эффективных
+        // пикселей — отсюда «читает хорошо если треть цифр». Порежем таблицу
+        // по строкам на части (Phys::fromVision сопоставляет строки со
+        // шкалами по ключевому слову, а не по позиции в массиве — собрать
+        // результат кусков заново безопасно) и прогоним каждую часть
+        // отдельно, чуть увеличив масштаб: тот же скриншот, но кадр на
+        // строку куда крупнее. Не получилось разрезать (нет ext-gd, странный
+        // формат) — падаем обратно на распознавание целиком, как раньше.
+        $chunks = self::sliceSignificanceImage($imageBytes, $mime, count($labels));
+        if (count($chunks) > 1) {
+            $rows = [];
+            $raws = [];
+            $offset = 0;
+            $failed = false;
+            foreach ($chunks as $chunk) {
+                $subLabels = array_slice($labels, $offset, $chunk['rows']);
+                $offset += $chunk['rows'];
+                try {
+                    $res = self::recognizeSignificanceOnce($chunk['bytes'], $chunk['mime'], $subLabels, $cfg);
+                } catch (Throwable $e) {
+                    $failed = true;
+                    break;
+                }
+                $rows = array_merge($rows, $res['rows']);
+                $raws[] = $res['raw'];
+            }
+            if (!$failed && $rows !== []) {
+                error_log('[recognizeSignificance] по частям: ' . count($chunks) . ' кусков, ' . count($rows) . ' строк');
+                return ['rows' => $rows, 'raw' => implode("\n---\n", $raws)];
+            }
+            error_log('[recognizeSignificance] распознавание по частям не удалось — пробуем целиком');
+        }
+        return self::recognizeSignificanceOnce($imageBytes, $mime, $labels, $cfg);
+    }
+
+    /**
+     * Режет скриншот таблицы значимости на горизонтальные полосы по строкам
+     * и слегка увеличивает каждую (2×, бикубически): та же информация, но
+     * крупнее на строку. Строки в этой таблице фиксированной высоты (формат
+     * Эгоскопа), поэтому высота строки берётся как ПРОСТОЕ деление общей
+     * высоты картинки на число строк — без детектирования границ.
+     *
+     * Кусков не больше 6 строк каждый: 12 строк СМУ режется на 2 куска по 6,
+     * 8 строк Басса-Дарки/ИЖС — на 2 по 4. Таблицы короче 7 строк не режем —
+     * там и так достаточно пикселей на строку.
+     *
+     * @return array<int, array{bytes:string, mime:string, rows:int}> пусто, если резать не получилось
+     */
+    private static function sliceSignificanceImage(string $bytes, string $mime, int $n): array {
+        if ($n <= 6 || !function_exists('imagecreatefromstring')) return [];
+        try {
+            $src = @imagecreatefromstring($bytes);
+            if ($src === false) return [];
+            $w = imagesx($src);
+            $h = imagesy($src);
+            if ($w <= 0 || $h <= 0) { imagedestroy($src); return []; }
+
+            $maxRowsPerChunk = 6;
+            $numChunks = (int) ceil($n / $maxRowsPerChunk);
+            $rowsPerChunk = (int) ceil($n / $numChunks);
+            $rowH = $h / $n;
+            $overlap = max(2, (int) round($rowH * 0.08)); // небольшой нахлёст на границе строк
+
+            $out = [];
+            $rowsLeft = $n;
+            $yTop = 0.0;
+            for ($c = 0; $c < $numChunks && $rowsLeft > 0; $c++) {
+                $take = min($rowsPerChunk, $rowsLeft);
+                $isLast = ($c === $numChunks - 1);
+                $sliceH = $isLast ? ($h - (int) round($yTop)) : (int) round($rowH * $take);
+                $yTopInt = max(0, (int) round($yTop) - ($c === 0 ? 0 : $overlap));
+                $sliceHPadded = min($h - $yTopInt, $sliceH + ($c === 0 ? 0 : $overlap) + ($isLast ? 0 : $overlap));
+                if ($sliceHPadded <= 0) break;
+
+                $slice = imagecreatetruecolor($w, $sliceHPadded);
+                imagecopy($slice, $src, 0, 0, 0, $yTopInt, $w, $sliceHPadded);
+
+                $scale = 2;
+                $scaled = @imagescale($slice, $w * $scale, $sliceHPadded * $scale, IMG_BICUBIC);
+                if ($scaled !== false) { imagedestroy($slice); $slice = $scaled; }
+
+                ob_start();
+                imagepng($slice);
+                $png = (string) ob_get_clean();
+                imagedestroy($slice);
+                if ($png === '') { imagedestroy($src); return []; }
+
+                $out[] = ['bytes' => $png, 'mime' => 'image/png', 'rows' => $take];
+                $yTop += $sliceH;
+                $rowsLeft -= $take;
+            }
+            imagedestroy($src);
+            return array_sum(array_column($out, 'rows')) === $n ? $out : [];
+        } catch (Throwable $e) {
+            return [];   // резка — оптимизация, а не обязательное условие (#2)
+        }
+    }
+
+    /** Один прогон vision-модели по ОДНОМУ изображению (целиком или куску) — было телом recognizeSignificance(). */
+    private static function recognizeSignificanceOnce(string $imageBytes, string $mime, array $labels, array $cfg): array {
         $dataUri = 'data:' . $mime . ';base64,' . base64_encode($imageBytes);
         $list = '';
         foreach (array_values($labels) as $i => $l) $list .= ($i + 1) . '. ' . $l . "\n";

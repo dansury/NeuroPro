@@ -37,7 +37,6 @@ try {
         case 'prompt_edit':   $method === 'POST' ? act_prompt_save($cfg) : view_prompt_edit($cfg, $h); break;
         case 'prompt_delete': act_prompt_delete($cfg); break;
         case 'prompt_family_delete': act_prompt_family_delete($cfg); break;
-        case 'interp_block':  act_interp_block($cfg); break;
         case 'interp_text':   act_interp_text($cfg); break;
         case 'interp_source': view_interp_source($cfg); break;
         case 'interp_paste':  act_interp_paste($cfg); break;
@@ -447,21 +446,26 @@ function view_result(array $cfg, callable $h): void {
         <div class="row"><h2>Интерпретация (промпт v<?= $h($it['version_no']) ?>, <?= $h($it['model_id']) ?>) <span class="muted"><?= $h($it['created_at']) ?></span>
           <?php if (!empty($it['edited_at'])): ?><span class="muted">· отредактировано <?= $h($it['edited_at']) ?></span><?php endif; ?></h2>
           <span>
+            <!-- Откат/возврат — последние СОХРАНЁННЫЕ правки этой интерпретации
+                 в рамках текущего открытия страницы (#6). -->
+            <a class="btn sm ghost off" href="#" data-undo="<?= (int)$it['id'] ?>" title="Отменить последнюю правку">↶</a>
+            <a class="btn sm ghost off" href="#" data-redo="<?= (int)$it['id'] ?>" title="Вернуть отменённую правку">↷</a>
             <a class="btn sm" href="?p=report&interp=<?= (int)$it['id'] ?>&print=1" target="_blank">⤓ PDF</a>
             <a class="btn sm" href="?p=email&interp=<?= (int)$it['id'] ?>" onclick="return confirm('Отправить отчёт на почту клиента?')">✉ На почту</a>
-            <!-- Карандаш: правка ВСЕГО текста разом, в Markdown. По абзацам
-                 удобно поправить формулировку, но переставить разделы или
-                 переписать отчёт целиком через двойной клик нельзя (#2). -->
+            <!-- Карандаш: тот же общий редактор, что и двойной клик — на
+                 случай, если нечего кликнуть (пустой отчёт) или курсор нужен
+                 просто в начале текста. -->
             <a class="btn sm" href="#" data-editall="<?= (int)$it['id'] ?>"
                title="Редактировать весь текст интерпретации (Markdown)">✏</a>
             <a class="btn sm danger" href="?p=interp_delete&interp=<?= (int)$it['id'] ?>" onclick="return confirm('Удалить интерпретацию? Её можно будет вернуть из «Удалённых» в течение <?= Trash::KEEP_DAYS ?> дней.')">🗑</a>
           </span>
         </div>
-        <p class="muted">Двойной клик по абзацу — правка (Ctrl+Enter — сохранить, Esc — отмена).
-           Пустой абзац удаляется. Карандаш ✏ открывает весь текст сразу.
-           Правка сразу попадает в PDF и в письмо.</p>
+        <p class="muted">Двойной клик по тексту — правка открывается курсором ровно там, где вы
+           кликнули. Клик за пределами поля правки — сохраняет текст автоматически
+           (Ctrl+Enter — сохранить сразу, Esc — отменить правку). Правка сразу попадает
+           в PDF и в письмо; ↶/↷ справа — откат и возврат последних сохранённых правок.</p>
         <div class="interp editable" data-interp="<?= (int)$it['id'] ?>"
-             data-src="<?= $h(Report::normalizeForEdit((string)$it['content'])) ?>"><?= Report::interpToEditableHtml($it['content']) ?></div>
+             data-src="<?= $h(Report::normalizeForEdit((string)$it['content'])) ?>"><?= Report::interpToHtml($it['content']) ?></div>
       </div>
     <?php endforeach; ?>
     <?php if ($interps || $trashed): ?>
@@ -470,78 +474,66 @@ function view_result(array $cfg, callable $h): void {
     </div><!-- /split-col: интерпретации -->
     </div><!-- /split -->
     <script>
-    /* Правка отчёта до выгрузки в PDF: двойной клик открывает абзац как текст
-       Markdown (ровно то, что лежит в базе), сохранение перерисовывает весь
-       блок интерпретации — после удаления абзаца номера сдвигаются. */
+    /* Правка отчёта до выгрузки в PDF — ОДИН общий редактор на весь текст
+       (#6): построчной правки по абзацам больше нет, двойной клик в любом
+       месте текста открывает Markdown-редактор с курсором ровно там, где
+       кликнули, а клик за пределами поля правки сохраняет её автоматически —
+       заполнять форму или нажимать «Сохранить» не обязательно. */
     (function(){
-      let editing = null;   // редактируемый .np-block
+      // История ПОСЛЕДНИХ СОХРАНЁННЫХ версий — на время текущего открытия
+      // страницы (сама интерпретация неограниченно версионируется только в
+      // виде «что сейчас в базе»): ↶/↷ листают её, не трогая сервер, кроме
+      // самого отката/возврата.
+      const history = new Map();  // interpId -> {stack:[text,…], pos:int}
 
-      // Состояние снимаем ДО подмены содержимого: удаление textarea вызывает
-      // blur, и если бы блок ещё считался редактируемым, обработчик blur начал
-      // бы вторую правку прямо во время перерисовки первой.
-      function close(block, html){
-        editing = null;
-        block.classList.remove('editing');
-        block.innerHTML = html;
+      function histOf(box){
+        const id = box.dataset.interp;
+        if (!history.has(id)) history.set(id, {stack: [box.dataset.src || ''], pos: 0});
+        return history.get(id);
       }
 
-      function open(block, text){
-        if (editing) return;                       // одна правка за раз
-        editing = block;
-        const rendered = block.innerHTML;
-        const src = text !== undefined ? text : (block.dataset.src || '');
-        const ta = document.createElement('textarea');
-        ta.className = 'blockedit';
-        ta.value = src;
-        block.classList.add('editing');
-        block.innerHTML = '';
-        block.appendChild(ta);
-        ta.style.height = Math.max(70, ta.scrollHeight + 12) + 'px';
-        ta.focus();
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-        ta.addEventListener('input', ()=>{ ta.style.height = Math.max(70, ta.scrollHeight + 4) + 'px'; });
-        ta.addEventListener('keydown', e=>{
-          if (e.key === 'Escape'){ e.preventDefault(); close(block, rendered); }
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){ e.preventDefault(); save(block, ta.value, rendered); }
-        });
-        // Клик мимо абзаца = сохранить: оператор правит текст, а не заполняет форму.
-        ta.addEventListener('blur', ()=>{ if (editing === block) save(block, ta.value, rendered); });
+      function updateHistButtons(box){
+        const h = histOf(box), id = box.dataset.interp;
+        const u = document.querySelector('[data-undo="' + id + '"]'), r = document.querySelector('[data-redo="' + id + '"]');
+        if (u) u.classList.toggle('off', h.pos <= 0);
+        if (r) r.classList.toggle('off', h.pos >= h.stack.length - 1);
       }
 
-      async function save(block, text, rendered){
-        const box = block.closest('.editable');
-        const idx = block.dataset.block;
-        if (text === (block.dataset.src || '')) { close(block, rendered); return; }
-        close(block, rendered);
-        const body = new URLSearchParams({interp: box.dataset.interp, block: idx, text: text});
-        try{
-          const r = await fetch('?p=interp_block', {method:'POST', body:body,
-            headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}});
-          const data = await r.json();
-          if (!data.ok) throw new Error(data.error || 'не удалось сохранить');
-          box.innerHTML = data.html;
-        }catch(err){
-          // Правка не теряется молча: возвращаем её в поле, чтобы оператор мог
-          // повторить сохранение или скопировать текст.
-          alert('Абзац не сохранён: ' + err.message);
-          const back = box.querySelector('.np-block[data-block="' + idx + '"]');
-          if (back) open(back, text);
+      function pushHist(box, text){
+        const h = histOf(box);
+        if (text === h.stack[h.pos]) return;
+        h.stack = h.stack.slice(0, h.pos + 1);
+        h.stack.push(text);
+        h.pos = h.stack.length - 1;
+        updateHistButtons(box);
+      }
+
+      /* Курсор туда, где кликнули (#6): ищем текстовый узел под курсором,
+         берём короткий буквальный кусок вокруг клика и находим его в самом
+         Markdown — разметка (#, **, -) вокруг слов не мешает: сами слова в
+         исходнике те же, что и в отрисованном тексте. */
+      function clickOffset(rawText, x, y){
+        let range = null;
+        if (document.caretRangeFromPoint) range = document.caretRangeFromPoint(x, y);
+        else if (document.caretPositionFromPoint) {
+          const pos = document.caretPositionFromPoint(x, y);
+          if (pos) { range = document.createRange(); range.setStart(pos.offsetNode, pos.offset); }
         }
+        if (!range || range.startContainer.nodeType !== Node.TEXT_NODE) return 0;
+        const full = range.startContainer.textContent, off = range.startOffset;
+        const start = Math.max(0, off - 16);
+        const anchor = full.slice(start, Math.min(full.length, off + 16));
+        for (let len = anchor.length; len >= 4; len -= 2) {
+          const probe = anchor.slice(0, len);
+          const idx = rawText.indexOf(probe);
+          if (idx !== -1) return Math.min(rawText.length, idx + Math.min(off - start, probe.length));
+        }
+        return 0;
       }
 
-      document.querySelectorAll('.interp.editable').forEach(box=>{
-        box.addEventListener('dblclick', e=>{
-          const block = e.target.closest('.np-block');
-          if (block && box.contains(block)) open(block);
-        });
-      });
-
-      /* ─── Правка ВСЕГО текста (карандаш) ───────────────────────────────
-         Абзац за абзацем нельзя ни переставить разделы, ни вставить готовый
-         текст из другого места. Здесь оператор получает весь Markdown, ровно
-         тот, что лежит в базе, и сохраняет его целиком. */
-      function openFull(box){
-        if (editing || box.classList.contains('fullediting')) return;
+      /* ─── Общий редактор ────────────────────────────────────────────── */
+      function openFull(box, caret){
+        if (box.classList.contains('fullediting')) return;
         const rendered = box.innerHTML;
         box.classList.add('fullediting');
         box.innerHTML = '';
@@ -552,24 +544,24 @@ function view_result(array $cfg, callable $h): void {
         bar.className = 'row editbar';
         const hint = document.createElement('span');
         hint.className = 'muted';
-        hint.textContent = 'Markdown: ## заголовок, **жирный**, - список. Ctrl+Enter — сохранить, Esc — отмена. Таблицы в отчёт не печатаются.';
-        const btns = document.createElement('span');
-        const ok = document.createElement('button');
-        ok.type = 'button'; ok.className = 'btn sm'; ok.textContent = 'Сохранить';
-        const no = document.createElement('button');
-        no.type = 'button'; no.className = 'btn sm ghost'; no.textContent = 'Отмена';
-        btns.append(ok, no);
-        bar.append(hint, btns);
+        hint.textContent = 'Markdown: ## заголовок, **жирный**, - список. Клик за пределами поля — сохранить. Ctrl+Enter — сохранить сразу, Esc — отменить правку.';
+        bar.append(hint);
         box.append(ta, bar);
         ta.style.height = Math.max(320, ta.scrollHeight + 16) + 'px';
         ta.focus();
-        ta.setSelectionRange(0, 0);
-        const cancel = ()=>{ box.classList.remove('fullediting'); box.innerHTML = rendered; };
-        no.addEventListener('click', cancel);
-        ok.addEventListener('click', ()=> saveFull(box, ta.value, rendered));
+        const pos = typeof caret === 'number' ? Math.max(0, Math.min(ta.value.length, caret)) : ta.value.length;
+        ta.setSelectionRange(pos, pos);
+        // Флаг вместо повторного blur-сохранения: Esc и Ctrl+Enter снимают
+        // textarea из DOM сами, а blur — только запасной путь для клика мимо.
+        let settled = false;
+        const cancel = ()=>{ settled = true; box.classList.remove('fullediting'); box.innerHTML = rendered; };
+        const commit = ()=>{ if (settled) return; settled = true; saveFull(box, ta.value, rendered); };
+        // Клик за пределами textarea (blur) — не отмена, а сохранение: правка
+        // текста, а не заполнение формы, которую можно захлопнуть без следа.
+        ta.addEventListener('blur', commit);
         ta.addEventListener('keydown', e=>{
           if (e.key === 'Escape'){ e.preventDefault(); cancel(); }
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){ e.preventDefault(); saveFull(box, ta.value, rendered); }
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){ e.preventDefault(); commit(); }
         });
       }
 
@@ -584,6 +576,7 @@ function view_result(array $cfg, callable $h): void {
           box.classList.remove('fullediting');
           box.dataset.src = data.src;
           box.innerHTML = data.html;
+          pushHist(box, data.src);
         }catch(err){
           // Текст остаётся в поле: правка целого отчёта — работа не на минуту,
           // и терять её из-за сбоя сети нельзя.
@@ -591,11 +584,55 @@ function view_result(array $cfg, callable $h): void {
         }
       }
 
+      /* Откат/возврат — просто переигрывают saveFull() на нужной версии из
+         истории, без открытия редактора. */
+      async function revertTo(box, text){
+        if (box.classList.contains('fullediting')) return;
+        const rendered = box.innerHTML;
+        const body = new URLSearchParams({interp: box.dataset.interp, text: text});
+        try{
+          const r = await fetch('?p=interp_text', {method:'POST', body:body,
+            headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}});
+          const data = await r.json();
+          if (!data.ok) throw new Error(data.error || 'не удалось сохранить');
+          box.dataset.src = data.src;
+          box.innerHTML = data.html;
+          updateHistButtons(box);
+        }catch(err){
+          box.innerHTML = rendered;
+          alert('Не удалось откатить правку: ' + err.message);
+        }
+      }
+
+      document.querySelectorAll('.interp.editable').forEach(box=>{
+        histOf(box);
+        box.addEventListener('dblclick', e=>{
+          if (box.classList.contains('fullediting')) return;
+          openFull(box, clickOffset(box.dataset.src || '', e.clientX, e.clientY));
+        });
+      });
+
       document.querySelectorAll('[data-editall]').forEach(btn=>{
         btn.addEventListener('click', e=>{
           e.preventDefault();
           const box = document.querySelector('.interp.editable[data-interp="' + btn.dataset.editall + '"]');
           if (box) openFull(box);
+        });
+      });
+
+      document.querySelectorAll('[data-undo],[data-redo]').forEach(btn=>{
+        btn.addEventListener('click', e=>{
+          e.preventDefault();
+          if (btn.classList.contains('off')) return;
+          const id = btn.dataset.undo || btn.dataset.redo;
+          const box = document.querySelector('.interp.editable[data-interp="' + id + '"]');
+          if (!box) return;
+          const h = histOf(box);
+          if (btn.dataset.undo && h.pos > 0) h.pos--;
+          else if (btn.dataset.redo && h.pos < h.stack.length - 1) h.pos++;
+          else return;
+          updateHistButtons(box);
+          revertTo(box, h.stack[h.pos]);
         });
       });
     })();
@@ -1037,31 +1074,14 @@ function act_prompt_delete(array $cfg): void {
  * их на клиенте. Правка сразу попадает и в PDF, и в письмо — они читают тот же
  * текст из базы.
  */
-function act_interp_block(array $cfg): void {
-    header('Content-Type: application/json; charset=utf-8');
-    $json = static function (array $data, int $code = 200): void {
-        http_response_code($code);
-        echo json_encode($data, JSON_UNESCAPED_UNICODE);
-    };
-    $id = (int)($_POST['interp'] ?? 0);
-    $idx = (int)($_POST['block'] ?? -1);
-    $it = Db::one('SELECT * FROM interpretations WHERE id=?', [$id]);
-    if (!$it) { $json(['ok' => false, 'error' => 'Интерпретация не найдена'], 404); return; }
-    try {
-        $updated = Report::replaceBlock((string)$it['content'], $idx, (string)($_POST['text'] ?? ''));
-    } catch (Throwable $e) {
-        $json(['ok' => false, 'error' => $e->getMessage()], 409); return;
-    }
-    Db::q("UPDATE interpretations SET content=?, edited_at=datetime('now') WHERE id=?", [$updated, $id]);
-    $json(['ok' => true, 'html' => Report::interpToEditableHtml($updated)]);
-}
-
 /**
- * Правка ВСЕГО текста интерпретации сразу (карандаш ✏ рядом с корзиной).
+ * Правка ВСЕГО текста интерпретации сразу — единственный редактор страницы
+ * результата (#6): построчной правки по абзацам больше нет, двойной клик по
+ * любому месту текста и откат/возврат (↶/↷) идут через этот же маршрут.
  * Оператор получает Markdown из базы, возвращает Markdown же — сервис только
- * приводит его к каноническому виду (Report::normalizeForEdit), чтобы нумерация
- * блоков для правки по абзацам осталась той же. Ответ — заново собранный HTML и
- * сохранённый текст: страница обновляет и то, и другое без перезагрузки.
+ * приводит его к каноническому виду (Report::normalizeForEdit). Ответ — заново
+ * собранный HTML и сохранённый текст: страница обновляет и то, и другое без
+ * перезагрузки.
  */
 function act_interp_text(array $cfg): void {
     header('Content-Type: application/json; charset=utf-8');
@@ -1076,7 +1096,7 @@ function act_interp_text(array $cfg): void {
     // Пустой текст — не правка, а потеря отчёта: для удаления есть корзина.
     if ($text === '') { $json(['ok' => false, 'error' => 'Текст пуст — используйте 🗑, если отчёт не нужен'], 409); return; }
     Db::q("UPDATE interpretations SET content=?, edited_at=datetime('now') WHERE id=?", [$text, $id]);
-    $json(['ok' => true, 'src' => $text, 'html' => Report::interpToEditableHtml($text)]);
+    $json(['ok' => true, 'src' => $text, 'html' => Report::interpToHtml($text)]);
 }
 
 /**
@@ -1376,11 +1396,11 @@ function layout(string $title, string $body, callable $h, array $opts = []): voi
   .shot img{max-width:100%;border:1px solid #d7dde3;border-radius:6px;margin:4px 0 10px}
   .interp h1,.interp h2,.interp h3,.interp h4,.interp h5,.interp h6{color:#b3203b}
   .interp h4,.interp h5,.interp h6{font-size:13px;margin:12px 0 4px}
-  .interp.editable .np-block{border:1px solid transparent;border-radius:5px;padding:1px 6px;margin:0 -6px;cursor:text}
-  .interp.editable .np-block:hover{border-color:#e0e5ea;background:#fbfcfd}
-  .interp.editable .np-block.editing{border-color:#b3203b;background:#fff}
-  textarea.blockedit{width:100%;font:inherit;font-family:Verdana,Geneva,sans-serif;border:0;outline:0;resize:vertical;padding:6px 0;background:transparent}
-  /* Правка всего текста разом (карандаш): поле во всю карточку + панель кнопок. */
+  /* Один общий редактор на весь текст (#6): весь блок — цель двойного клика,
+     без разбивки на отдельно кликабельные абзацы. */
+  .interp.editable{cursor:text;border-radius:5px;padding:1px 6px;margin:0 -6px}
+  .interp.editable:hover{background:#fbfcfd}
+  /* Правка всего текста разом: поле во всю карточку + панель подсказки. */
   textarea.fulledit{width:100%;font:inherit;font-family:Verdana,Geneva,sans-serif;border:1px solid #b3203b;
                     border-radius:5px;resize:vertical;padding:10px;background:#fff;line-height:1.5}
   .editbar{margin-top:8px;align-items:flex-start} .editbar .btn{margin-left:6px}

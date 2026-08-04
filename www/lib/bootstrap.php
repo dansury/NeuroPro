@@ -57,13 +57,18 @@ const NP_PROMPT_STYLE_SONNET_COMMENT = 'Sonnet (второй слой): прав
 // Поколение «Первый шаг» — то же поколение «Sonnet» плюс последний раздел
 // отчёта: одно конкретное действие на шкале, выбранной расчётом.
 const NP_PROMPT_ACTION_COMMENT = 'Первый шаг: отчёт заканчивается одним конкретным действием на шкале, выбранной расчётом';
+// «Первый шаг v2» — разбор реального отчёта показал: там, где хватало одного
+// чёткого предложения, модель писала три; отчёт заканчивался резюме ДО
+// действия, а не действием; общий показатель методики стоял в конце разбора,
+// а не в начале. v2 правит объём и порядок текста, математику не трогает.
+const NP_PROMPT_ACTION_V2_COMMENT = 'Первый шаг v2: короче на шкалу, общий показатель методики — в начале, без «Короткого резюме», без придуманной периодичности';
 
 /** Комментарии всех автосидируемых версий — по ним отличаем служебные от ручных. */
 function np_seeded_comments(): array {
     return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
             NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
             NP_PROMPT_V9_COMMENT, NP_PROMPT_STYLE_COMMENT, NP_PROMPT_SONNET_COMMENT,
-            NP_PROMPT_STYLE_SONNET_COMMENT, NP_PROMPT_ACTION_COMMENT];
+            NP_PROMPT_STYLE_SONNET_COMMENT, NP_PROMPT_ACTION_COMMENT, NP_PROMPT_ACTION_V2_COMMENT];
 }
 
 /** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
@@ -123,6 +128,7 @@ function np_seed_prompts(array $cfg = []): void {
     np_seed_prompts_sonnet($model, $provider);
     np_seed_style_prompt_sonnet($model, $provider);
     np_seed_prompts_action($model, $provider);
+    np_seed_prompts_action_v2($model, $provider);
     np_heal_seeded_models($model, $provider);
 }
 
@@ -169,6 +175,30 @@ function np_seed_prompts_action(string $model = 'yandexgpt', string $provider = 
         [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
          NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
          NP_PROMPT_V9_COMMENT, NP_PROMPT_SONNET_COMMENT],
+        $model, $provider
+    );
+}
+
+/**
+ * Досидирует поколение «Первый шаг v2» — ОДНОВРЕМЕННО У ВСЕХ ТРЁХ методик.
+ * Заказчик разобрал реальный отчёт («Sonnet», умная модель) и указал на три
+ * проблемы разом: там, где хватало одного чёткого предложения на ~30 слов,
+ * модель писала два-три «на всякий случай»; отчёт заканчивался «Коротким
+ * резюме», а НЕ действием (заказчик прямо просил: никаких резюме, только
+ * финальное действие); общий показатель методики («Результат или процесс» у
+ * СМУ, «Общая картина защит» у ИЖС, «Агрессивность и враждебность» у
+ * Басса-Дарки) стоял в конце разбора шкал, а не открывал его. v2 правит
+ * именно это — математика и состав разделов не меняются (Конституция,
+ * принцип I). Активной становится, только если сейчас активна нетронутая
+ * версия «Первый шаг» (v1) — ручной выбор оператора не трогаем.
+ */
+function np_seed_prompts_action_v2(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    np_seed_prompt_generation(
+        ['smu' => 'smu_action_v2.php', 'lsi' => 'lsi_action_v2.php', 'bd' => 'bd_action_v2.php'],
+        NP_PROMPT_ACTION_V2_COMMENT,
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
+         NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
+         NP_PROMPT_V9_COMMENT, NP_PROMPT_SONNET_COMMENT, NP_PROMPT_ACTION_COMMENT],
         $model, $provider
     );
 }
