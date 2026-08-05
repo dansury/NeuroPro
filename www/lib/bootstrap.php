@@ -62,13 +62,24 @@ const NP_PROMPT_ACTION_COMMENT = 'Первый шаг: отчёт заканчи
 // действия, а не действием; общий показатель методики стоял в конце разбора,
 // а не в начале. v2 правит объём и порядок текста, математику не трогает.
 const NP_PROMPT_ACTION_V2_COMMENT = 'Первый шаг v2: короче на шкалу, общий показатель методики — в начале, без «Короткого резюме», без придуманной периодичности';
+// «Первый шаг v3» — разбор реального отчёта ИЖС и Басса-Дарки нашёл две вещи:
+// у ИЖС защиты с низким баллом и ненадёжным телесным откликом молча выпадали
+// из отчёта вместо краткого перечисления («Не свойственно»); у Басса-Дарки
+// недостоверный отклик, ведомый не эмоциональным каналом, попадал в
+// «Проявленные»/«Скрытое напряжение» наравне с надёжным — и текст получался
+// противоречивым (одно предложение про переживание, соседнее — что тело не
+// откликается). Расчёт (Metrics::category()/physReliable()) это чинит сам;
+// v3 приводит промпты в соответствие и добавляет общий запрет — не использовать
+// имя одной шкалы как обиходное слово при описании другой (Конституция, п. II).
+const NP_PROMPT_ACTION_V3_COMMENT = 'Первый шаг v3: раздел «Не свойственно» у ИЖС, ненадёжный телесный отклик (Z/X без значимости) не тянет в «Скрытое напряжение»/«Проявленные», запрет путать названия шкал';
 
 /** Комментарии всех автосидируемых версий — по ним отличаем служебные от ручных. */
 function np_seeded_comments(): array {
     return [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
             NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
             NP_PROMPT_V9_COMMENT, NP_PROMPT_STYLE_COMMENT, NP_PROMPT_SONNET_COMMENT,
-            NP_PROMPT_STYLE_SONNET_COMMENT, NP_PROMPT_ACTION_COMMENT, NP_PROMPT_ACTION_V2_COMMENT];
+            NP_PROMPT_STYLE_SONNET_COMMENT, NP_PROMPT_ACTION_COMMENT, NP_PROMPT_ACTION_V2_COMMENT,
+            NP_PROMPT_ACTION_V3_COMMENT];
 }
 
 /** Метаданные семейств промптов: вшитый исходник v1, txt-исходник и имя. */
@@ -129,6 +140,7 @@ function np_seed_prompts(array $cfg = []): void {
     np_seed_style_prompt_sonnet($model, $provider);
     np_seed_prompts_action($model, $provider);
     np_seed_prompts_action_v2($model, $provider);
+    np_seed_prompts_action_v3($model, $provider);
     np_heal_seeded_models($model, $provider);
 }
 
@@ -199,6 +211,32 @@ function np_seed_prompts_action_v2(string $model = 'yandexgpt', string $provider
         [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
          NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
          NP_PROMPT_V9_COMMENT, NP_PROMPT_SONNET_COMMENT, NP_PROMPT_ACTION_COMMENT],
+        $model, $provider
+    );
+}
+
+/**
+ * Досидирует поколение «Первый шаг v3» — ОДНОВРЕМЕННО У ВСЕХ ТРЁХ методик.
+ * Заказчик сравнил автоматический отчёт ИЖС со своим ручным разбором того же
+ * клиента и разбором Басса-Дарки: у ИЖС защиты с низким баллом и ненадёжным
+ * телесным откликом молча выпадали из отчёта — теперь у них есть раздел «Не
+ * свойственно» (Metrics::CATEGORY_BY_TEST['lsi']['skip']); у Басса-Дарки
+ * недостоверный, ведомый не эмоциональным каналом отклик заводил шкалу в
+ * «Проявленные»/«Скрытое напряжение» наравне с надёжным, и текст получался
+ * противоречивым — расчёт (Metrics::category()/physReliable()) это больше не
+ * допускает. v3 приводит промпты в соответствие с новой математикой и
+ * добавляет общий запрет: не использовать имя одной шкалы методики как
+ * обиходное слово при описании другой (Конституция, принцип II). Активной
+ * становится, только если сейчас активна нетронутая версия «Первый шаг v2» —
+ * ручной выбор оператора не трогаем.
+ */
+function np_seed_prompts_action_v3(string $model = 'yandexgpt', string $provider = 'yandex'): void {
+    np_seed_prompt_generation(
+        ['smu' => 'smu_action_v3.php', 'lsi' => 'lsi_action_v3.php', 'bd' => 'bd_action_v3.php'],
+        NP_PROMPT_ACTION_V3_COMMENT,
+        [NP_PROMPT_V1_COMMENT, NP_PROMPT_V2_COMMENT, NP_PROMPT_V3_COMMENT, NP_PROMPT_V4_COMMENT,
+         NP_PROMPT_V5_COMMENT, NP_PROMPT_V6_COMMENT, NP_PROMPT_V7_COMMENT, NP_PROMPT_V8_COMMENT,
+         NP_PROMPT_V9_COMMENT, NP_PROMPT_SONNET_COMMENT, NP_PROMPT_ACTION_COMMENT, NP_PROMPT_ACTION_V2_COMMENT],
         $model, $provider
     );
 }

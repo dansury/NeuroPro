@@ -272,6 +272,20 @@ final class Metrics {
      * Ключ теста → категория → ['title' => …, 'meaning' => …] (любое поле можно опустить).
      */
     public const CATEGORY_BY_TEST = [
+        'lsi' => [
+            // Заказчик просит короткий раздел вместо молчаливого выпадения из
+            // отчёта: те же защиты, что раньше пропадали без следа (низкий балл
+            // и ненадёжный телесный отклик — см. category()/categoryFor()),
+            // теперь перечисляются одним списком с кратким пояснением сути —
+            // без разбора, как «Не проявляются» у Басса-Дарки (listsSkipped()).
+            'skip' => [
+                'title' => 'Не свойственно',
+                'meaning' => 'ни ответы, ни надёжный телесный отклик не подтверждают эту защиту (отклика нет, он у '
+                    . 'медианы, или он есть, но недостоверен и ведёт не эмоциональный канал): перечисли эти защиты '
+                    . 'ОДНИМ списком с кратким пояснением сути каждой в несколько слов — без разбора, без телесных '
+                    . 'выводов и без оценок',
+            ],
+        ],
         'smu' => [
             'strained' => [
                 'title' => 'Сильные мотиваторы',
@@ -360,13 +374,23 @@ final class Metrics {
     /**
      * Категория шкалы с учётом методики: общая таблица + слияние в группы теста.
      * Единственное место, откуда категория берётся в расчёте.
+     *
+     * @param string $dominant доминирующий канал СМК ('X'/'Y'/'Z'/'') — нужен,
+     *                         чтобы «above» без значимости и без ведущего Y не
+     *                         засчитывалось как надёжная телесная вовлечённость
+     *                         (см. category()).
      */
-    public static function categoryFor(string $testKey, string $level, ?string $physState, bool $sig): string {
-        $category = self::category($level, $physState, $sig);
+    public static function categoryFor(string $testKey, string $level, ?string $physState, bool $sig,
+                                        string $dominant = ''): string {
+        $category = self::category($level, $physState, $sig, $dominant);
         if (!in_array($category, self::CATEGORY_MERGE_BY_TEST[$testKey] ?? [], true)) return $category;
-        // Слитые категории решаются по тем же двум признакам, что и группы:
-        // отклик тела выше медианы и выраженность в ответах теста.
-        if ($physState === 'above') return 'strained';
+        // Слитые категории решаются по тем же признакам, что и группы: отклик
+        // тела выше медианы ЗАСЧИТЫВАЕТСЯ, только если он надёжен (та же
+        // проверка reliable(), что и в category()) — иначе «above» без
+        // значимости и без ведущего Y превращал бы любую мотивированную, но
+        // статистически шумную реакцию в «Проявленные»/«Выраженные напряжённые
+        // формы», хотя канал (Z/X) и отсутствие значимости этого не подтверждают.
+        if ($physState === 'above' && self::physReliable($sig, $dominant)) return 'strained';
         return $level === 'low' ? 'skip' : 'habitual';
     }
 
@@ -380,6 +404,10 @@ final class Metrics {
     public const CATEGORY_ORDER_BY_TEST = [
         'bd' => ['strained', 'habitual', 'hidden', 'cognitive', 'skip'],
         'smu' => ['strained', 'hidden', 'variable', 'habitual', 'calm'],
+        // Заказчик просит для ИЖС тот же порядок, что уже действует у
+        // Басса-Дарки: сначала выраженные и по тесту, и по физиологии, потом
+        // привычные формы, потом скрытое напряжение.
+        'lsi' => ['strained', 'habitual', 'hidden', 'variable', 'calm', 'cognitive', 'skip'],
     ];
 
     /** Порядок категорий для методики — всегда полный список ключей CATEGORIES. */
@@ -447,7 +475,8 @@ final class Metrics {
 
             $level = self::level($pct);
             $physState = self::physState($zna, $midBand);
-            $category = self::categoryFor($testKey, $level, $physState, $sig);
+            $dominant = self::dominant($smk);
+            $category = self::categoryFor($testKey, $level, $physState, $sig, $dominant);
 
             // Столбец «Балл» со скриншота больше не читается и не сверяется:
             // распознаём только «Знач.» (требование заказчика — прочие числовые
@@ -483,7 +512,7 @@ final class Metrics {
                 // нейросети (Конституция, принцип I).
                 'cog_pct' => round($pct, 1),
                 'phys_pct' => self::physPct($zna, $physScale),
-                'dominant' => self::dominant($smk),
+                'dominant' => $dominant,
                 'dominant_strong' => $smk !== '' && str_contains($smk, '*'),
                 'weight' => self::weight($pct, $zna, $physScale),
                 'matrix_zone' => self::zone($level, $physState),
@@ -762,16 +791,34 @@ final class Metrics {
      *     Раньше низкий балл выбрасывал шкалу даже при телесном отклике — так из
      *     отчёта пропадал классический антимотиватор («в ответах не важно, а тело
      *     реагирует»).
+     *
+     *  3. «above» без значимости и без ведущего эмоционального канала (Y) —
+     *     НЕНАДЁЖНЫЙ сигнал (см. physReliable()). Разбор реального отчёта по
+     *     Басса-Дарки показал: шкала со средним баллом и недостоверным «Знач.»,
+     *     ведомым мышечным или аналитическим каналом (Z/X), попадала в
+     *     «Проявленные»/«Скрытое напряжение» наравне с настоящей телесной
+     *     вовлечённостью — и текст получался противоречивым (одно предложение
+     *     говорит о переживании, соседнее — что тело не откликается). Теперь
+     *     такой сигнал засчитывается только при p<0.05 ИЛИ ведущем Y; иначе
+     *     шкала разбирается по одним ответам теста — как если бы физиология
+     *     была не выше медианы, а спокойной (заказчик: «в раздел „Скрытое
+     *     напряжение“ или „Реакции средней выраженности“ — только Y или
+     *     p<0,05; иначе — „Привычные формы“/„Не свойственно“»).
      */
-    public static function category(string $level, ?string $physState, bool $sig): string {
+    public static function category(string $level, ?string $physState, bool $sig, string $dominant = ''): string {
         // Физиологии по шкале нет — о теле говорить нечем, судим по ответам.
         if ($physState === null) return $level === 'low' ? 'skip' : 'cognitive';
 
         // Тело откликается сильнее медианы.
         if ($physState === 'above') {
-            if ($level === 'low') return 'hidden';                 // расхождение: ответы молчат, тело нет
-            if ($level === 'high') return 'strained';
-            return $sig ? 'strained' : 'variable';                 // середина: решает достоверность
+            if ($level === 'high') return 'strained';               // выражено и по тесту, и по телу
+            if (!self::physReliable($sig, $dominant)) {
+                // Отклик есть, но ненадёжен (см. правку 3 выше) — судим так же,
+                // как если бы телесной цены у темы не было.
+                return $level === 'low' ? 'skip' : 'habitual';
+            }
+            if ($level === 'low') return 'hidden';                  // расхождение: ответы молчат, тело — да
+            return $sig ? 'strained' : 'variable';                  // середина: решает достоверность
         }
 
         // Тело достоверно ниже медианы: телесной цены у темы нет.
@@ -785,6 +832,19 @@ final class Metrics {
 
         // У самой медианы: ни напряжения, ни явного спокойствия.
         return $level === 'high' ? 'habitual' : 'variable';
+    }
+
+    /**
+     * Надёжна ли телесная вовлечённость «above» — засчитывается только при
+     * статистической значимости (p<0.05) ИЛИ ведущем эмоциональном канале (Y).
+     * Мышечный/аналитический канал (Z/X) без значимости не подтверждает
+     * телесную вовлечённость: соотношение X/Y/Z показывает УСТРОЙСТВО реакции,
+     * а не её достоверность, и Z/X — это твёрдая позиция или обдумывание,
+     * которые сами по себе не означают, что тело «зацепило» темой сильнее
+     * обычного (требование заказчика, см. category()).
+     */
+    private static function physReliable(bool $sig, string $dominant): bool {
+        return $sig || $dominant === 'Y';
     }
 
     /**
