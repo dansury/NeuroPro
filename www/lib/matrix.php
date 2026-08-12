@@ -65,14 +65,24 @@ final class Matrix {
     /** Зазор между кружками при разведении наложений (#10). */
     private const GAP = 1.5;
 
-    /** Легенда: параметры СМК как секторы кружка + служебные случаи. */
+    /**
+     * Легенда: параметры СМК (секторы кружка при отклике тела выше медианы) —
+     * буквы X/Y/Z в подписях не печатаем, в отчёте клиента это служебное
+     * обозначение, не смысл. Эти четыре пункта («Телесный отклик») кладутся в
+     * легенде фиксированной сеткой по LEGEND_GROUP_COLS в строке — одним
+     * узнаваемым блоком, а не вперемешку с остальными пунктами. «Фон: не
+     * разбирается в отчёте» в этот блок не входит — он печатается последним
+     * пунктом легенды (см. svg()), после достоверности и расхождения.
+     */
     private const LEGEND = [
-        [self::C_Y, 'Y — эмоциональный отклик'],
-        [self::C_X, 'X — психическое напряжение'],
-        [self::C_Z, 'Z — мышечная реакция'],
+        [self::C_Y, 'эмоциональный отклик'],
+        [self::C_X, 'психическое напряжение'],
+        [self::C_Z, 'мышечная реакция'],
         [self::C_NONE, 'параметр не распознан'],
-        [self::C_FLAT, 'фон: не разбирается в отчёте'],
     ];
+
+    /** Колонок в строке у блока «Телесный отклик» легенды. */
+    private const LEGEND_GROUP_COLS = 2;
 
     /**
      * Радиус кружка. Размер показывает, насколько показатель тяжелее ОСТАЛЬНЫХ
@@ -118,20 +128,31 @@ final class Matrix {
         $wMin = (float) ($metrics['weight_min'] ?? 0.0);
         $wMax = (float) ($metrics['weight_max'] ?? 1.0);
 
-        $padL = 62; $padR = 26; $padT = 46;
+        $padL = 62; $padR = 26;
         $plotW = $W - $padL - $padR;
         // Вертикальная ось — результаты теста, они есть всегда (в отличие от
         // телесного отклика, который иногда не распознан), поэтому высота
         // площадки больше не зависит от наличия физиологии.
         $plotH = (int) round($plotW * 0.62);
+        // Заголовок должен уместиться на любой ширине картинки: в PDF матрица
+        // почти втрое уже, чем на странице результата (387 px против 900), и
+        // полная подпись «Матрица показателей: ответы теста × телесный отклик»
+        // при фиксированном кегле 14 px обрезалась с обеих сторон (текст
+        // центрирован, лишнее по краям просто уходило за viewBox).
+        $titleInfo = self::fitTitle($title, $W - 16);
+        $padT = 46 + (count($titleInfo['lines']) - 1) * 14;
         // Пояснений под матрицей больше нет: расшифровки цветов, пунктира и
         // обводки заказчик просил убрать — всё, что нужно, читается по легенде
         // (#4). Освободившееся место отдано самой картинке.
         $legend = self::LEGEND;
         if ($hasPhys) {
-            $legend[] = [null, 'достоверно (p<0.05)'];
+            $legend[] = [null, 'высокодостоверно (p<0.05)'];
             $legend[] = ['alert', 'ниже порога по тесту, но тело откликается'];
         }
+        // «Фон» — последний пункт легенды (заказчик просил убрать его из общего
+        // блока «Телесный отклик» и переставить в конец, после достоверности и
+        // расхождения).
+        $legend[] = [self::C_FLAT, 'фон: не разбирается в отчёте'];
         // Раскладку легенды считаем ЗДЕСЬ, до высоты картинки: раньше число строк
         // оценивалось грубой формулой и внизу оставались пустые строки.
         $legendRows = self::legendRows($legend, $padL, $W - $padR);
@@ -162,8 +183,13 @@ final class Matrix {
              . ' data-band-pct="' . Metrics::num((float) ($metrics['mid_band_frac'] ?? Metrics::MID_BAND_FRAC) * 100.0) . '"'
              . ' data-rmin="' . self::R_MIN . '" data-rmax="' . self::R_MAX . '" data-gap="' . self::GAP . '">';
         $s[] = '<rect width="100%" height="100%" fill="#ffffff"/>';
-        $s[] = '<text x="' . round($W / 2) . '" y="24" text-anchor="middle" font-size="14" font-weight="bold" fill="' . self::TEXT . '">'
-             . self::esc($title) . '</text>';
+        $titleX = round($W / 2);
+        $titleTag = '<text x="' . $titleX . '" y="24" text-anchor="middle" font-size="' . self::num3($titleInfo['fs'])
+                  . '" font-weight="bold" fill="' . self::TEXT . '">';
+        foreach ($titleInfo['lines'] as $k => $ln) {
+            $titleTag .= '<tspan x="' . $titleX . '" dy="' . ($k === 0 ? 0 : 14) . '">' . self::esc($ln) . '</tspan>';
+        }
+        $s[] = $titleTag . '</text>';
         $s[] = '<rect x="' . $padL . '" y="' . $padT . '" width="' . $plotW . '" height="' . $plotH . '" fill="#fbfcfd" stroke="' . self::AXIS . '"/>';
 
         // Сетка и подписи оси ординат (вертикальной) — результаты теста, в
@@ -334,10 +360,27 @@ final class Matrix {
                 $isFlat = self::isPale($a);
                 if ($isFlat !== $paleTurn) continue;
                 $text = self::flat((string) $a['short']);
-                $box = self::labelBox($p, $text, $bubbles, $labels, $padL, $W - 4);
+                $box = self::labelBox($p, $text, $bubbles, $labels, $padL, $W - 4, $padT, $padT + $plotH);
                 if ($box === null) continue;
-                [$tx, $ty, $anchor, $rect] = $box;
+                [$tx, $ty, $anchor, $rect, $callout] = $box;
                 $labels[] = $rect;
+                if ($callout) {
+                    // Рядом с плотным скоплением кружков подпись не влезла ни в
+                    // одну из ближних позиций — вместо того, чтобы молча пропасть
+                    // из картинки, её выносят дальше и тянут к кружку тонкую
+                    // линию-указатель. data-side/data-dy — то же, чем интерактив
+                    // двигает саму подпись (mx-name): при смене контраста линия
+                    // должна следовать за кружком так же, как и текст.
+                    $dx = $tx - $p['x']; $dy = $ty - $p['y'];
+                    $dist = sqrt($dx * $dx + $dy * $dy) ?: 1.0;
+                    $ux = $dx / $dist; $uy = $dy / $dist;
+                    $lx1 = round($p['x'] + $ux * ($p['r'] + 1.5), 1); $ly1 = round($p['y'] + $uy * ($p['r'] + 1.5), 1);
+                    $lx2 = round($tx - $ux * 3, 1); $ly2 = round($ty - $uy * 3, 1);
+                    $s[] = '<line class="mx-leader" data-n="' . (int) $a['n'] . '" data-side="' . $anchor . '" data-dy="'
+                         . round($ty - $p['y'], 1) . '" x1="' . $lx1 . '" y1="' . $ly1 . '" x2="' . $lx2 . '" y2="' . $ly2
+                         . '" stroke="' . self::DIM . '" stroke-width="0.8" stroke-dasharray="2 2" pointer-events="none"'
+                         . ($isFlat ? ' display="none"' : '') . '/>';
+                }
                 $s[] = '<text class="mx-name" data-n="' . (int) $a['n'] . '" data-dy="' . round($ty - $p['y'], 1)
                      . '" data-side="' . $anchor . '" x="' . round($tx, 1) . '" y="' . round($ty + 3.2, 1)
                      . '" text-anchor="' . $anchor . '" font-size="9"' . (!empty($a['sig']) ? ' font-weight="bold"' : '')
@@ -346,22 +389,19 @@ final class Matrix {
             }
         }
 
-        // Легенда — по той же раскладке, по которой выше посчитана высота картинки.
-        $ly = $padT + $plotH + 46;
-        $lx = $padL;
-        foreach ($legend as $k => [$c, $label]) {
-            $width = self::legendWidth($label);
-            if ($k > 0 && $lx + $width > $W - $padR) { $lx = $padL; $ly += 15; }
+        // Легенда — по той же раскладке, по которой выше посчитана высота картинки
+        // (legendLayout — один источник истины на оба места).
+        $ly0 = $padT + $plotH + 46;
+        foreach (self::legendLayout($legend, $padL, $W - $padR)['items'] as ['row' => $row, 'x' => $ix, 'c' => $c, 'label' => $label]) {
+            $iy = $ly0 + $row * 15;
             $s[] = match ($c) {
                 // Достоверность и расхождение — это обводка, а не заливка: в
                 // легенде они показаны пустым кружком с той же обводкой.
-                null    => '<circle cx="' . ($lx + 5) . '" cy="' . ($ly - 3) . '" r="4.5" fill="#ffffff" stroke="#2a3138" stroke-width="2.6"/>',
-                'alert' => '<circle cx="' . ($lx + 5) . '" cy="' . ($ly - 3) . '" r="4.5" fill="#ffffff" stroke="' . self::C_ALERT . '" stroke-width="2.4"/>',
-                default => '<circle cx="' . ($lx + 5) . '" cy="' . ($ly - 3) . '" r="5" fill="' . $c . '" fill-opacity="0.72" stroke="' . $c . '"/>',
+                null    => '<circle cx="' . ($ix + 5) . '" cy="' . ($iy - 3) . '" r="4.5" fill="#ffffff" stroke="#2a3138" stroke-width="2.6"/>',
+                'alert' => '<circle cx="' . ($ix + 5) . '" cy="' . ($iy - 3) . '" r="4.5" fill="#ffffff" stroke="' . self::C_ALERT . '" stroke-width="2.4"/>',
+                default => '<circle cx="' . ($ix + 5) . '" cy="' . ($iy - 3) . '" r="5" fill="' . $c . '" fill-opacity="0.72" stroke="' . $c . '"/>',
             };
-            $s[] = '<text x="' . ($lx + 14) . '" y="' . $ly . '" font-size="9.5"' . ($c === null ? ' font-weight="bold"' : '')
-                 . ' fill="' . self::TEXT . '">' . self::esc($label) . '</text>';
-            $lx += $width + 10;
+            $s[] = '<text x="' . ($ix + 14) . '" y="' . $iy . '" font-size="9.5" fill="' . self::TEXT . '">' . self::esc($label) . '</text>';
         }
 
         $s[] = '</svg>';
@@ -525,8 +565,9 @@ final class Matrix {
     return RMIN+(RMAX-RMIN)*Math.max(0,Math.min(1,t));
   }
 
-  var names={};
+  var names={}, leaders={};
   svg.querySelectorAll('.mx-name').forEach(function(t){ names[t.dataset.n]=t; });
+  svg.querySelectorAll('.mx-leader').forEach(function(l){ leaders[l.dataset.n]=l; });
   var bubbles=[].slice.call(svg.querySelectorAll('.mx-bubble'));
 
   /* Разведение наложений — зеркало Matrix::spread(). Стартуем всегда от истинных
@@ -609,6 +650,18 @@ final class Matrix {
         nm.setAttribute('display', pale?'none':'inline');
         nm.setAttribute('x', num(nm.dataset.side==='start' ? cx+r+4 : cx-r-4));
         nm.setAttribute('y', num(cy+(+nm.dataset.dy||0)+3.2));
+      }
+      var ld=leaders[g.dataset.n];
+      if(ld){
+        // Линия-указатель тянется за той же подписью (зеркало Matrix::labelBox
+        // callout-ветки): пересчитываем оба конца от нового положения кружка.
+        ld.setAttribute('display', pale?'none':'inline');
+        var side=ld.dataset.side, ldy=+ld.dataset.dy||0,
+            tx=side==='start'?cx+r+4:cx-r-4, ty=cy+ldy,
+            ldx=tx-cx, ldyv=ty-cy, ldist=Math.sqrt(ldx*ldx+ldyv*ldyv)||1,
+            lux=ldx/ldist, luy=ldyv/ldist;
+        ld.setAttribute('x1', num(cx+lux*(r+1.5))); ld.setAttribute('y1', num(cy+luy*(r+1.5)));
+        ld.setAttribute('x2', num(tx-lux*3)); ld.setAttribute('y2', num(ty-luy*3));
       }
     });
   }
@@ -984,13 +1037,21 @@ final class Matrix {
     /**
      * Место для подписи кружка: справа или слева, с вертикальным сдвигом.
      * Перебираем варианты и берём первый, который не залезает ни на другой
-     * кружок, ни на уже поставленную подпись, ни за край картинки. Если места
-     * нет — подписи не будет: показатель опознаётся по номеру (список под
-     * матрицей), а нагромождение текста делает матрицу нечитаемой.
+     * кружок, ни на уже поставленную подпись, ни за край картинки.
      *
-     * @return array{0:float,1:float,2:string,3:array{0:float,1:float,2:float,3:float}}|null
+     * Рядом места может не быть вовсе — плотное скопление кружков (заказчик
+     * присылал такую матрицу). Раньше подписи в этом случае просто не было:
+     * показатель опознавался только по номеру. Теперь второй проход ищет
+     * место ДАЛЬШЕ от кружка и возвращает его с пометкой «нужна линия-
+     * указатель» (callout) — вызывающий код рисует от кружка к подписи тонкую
+     * линию, и показатель не пропадает из картинки молча.
+     *
+     * @return array{0:float,1:float,2:string,3:array{0:float,1:float,2:float,3:float},4:bool}|null
      */
-    private static function labelBox(array $p, string $text, array $bubbles, array $labels, float $minX, float $maxX): ?array {
+    private static function labelBox(
+        array $p, string $text, array $bubbles, array $labels,
+        float $minX, float $maxX, float $minY, float $maxY
+    ): ?array {
         $w = mb_strlen($text) * 5.05 + 3.0;    // ширина строки Verdana 9 px
         foreach ([0.0, -12.0, 12.0, -22.0, 22.0] as $dy) {
             $ty = $p['y'] + $dy;
@@ -999,7 +1060,20 @@ final class Matrix {
                 $rect = $anchor === 'start' ? [$tx, $ty - 5.5, $tx + $w, $ty + 5.5] : [$tx - $w, $ty - 5.5, $tx, $ty + 5.5];
                 if ($rect[0] < $minX || $rect[2] > $maxX) continue;
                 if (self::hits($rect, $bubbles) || self::hits($rect, $labels)) continue;
-                return [$tx, $ty, $anchor, $rect];
+                return [$tx, $ty, $anchor, $rect, false];
+            }
+        }
+        // Указатель: та же ширина строки, но подпись ищет место дальше от
+        // кружка по вертикали, зажатая границами площадки (иначе она могла бы
+        // уехать поверх легенды или подписи горизонтальной оси).
+        foreach ([-34.0, 34.0, -48.0, 48.0, -62.0, 62.0, -76.0, 76.0, -90.0, 90.0] as $dy) {
+            $ty = max($minY + 5.5, min($maxY - 5.5, $p['y'] + $dy));
+            foreach (['start', 'end'] as $anchor) {
+                $tx = $anchor === 'start' ? $p['x'] + $p['r'] + 4 : $p['x'] - $p['r'] - 4;
+                $rect = $anchor === 'start' ? [$tx, $ty - 5.5, $tx + $w, $ty + 5.5] : [$tx - $w, $ty - 5.5, $tx, $ty + 5.5];
+                if ($rect[0] < $minX || $rect[2] > $maxX) continue;
+                if (self::hits($rect, $bubbles) || self::hits($rect, $labels)) continue;
+                return [$tx, $ty, $anchor, $rect, true];
             }
         }
         return null;
@@ -1018,16 +1092,66 @@ final class Matrix {
         return 22 + round(mb_strlen($label) * 5.4);
     }
 
-    /** Сколько строк займёт легенда при данной ширине — та же раскладка, что при отрисовке. */
-    private static function legendRows(array $legend, float $minX, float $maxX): int {
-        $rows = 1;
+    /**
+     * Раскладка легенды — единственное место, где она считается: и высота
+     * картинки (нужна ДО рисования, см. svg()), и координаты пунктов (нужны ВО
+     * ВРЕМЯ рисования) берутся отсюда, иначе две отдельные реализации рано или
+     * поздно разойдутся и число строк перестанет совпадать с тем, что реально
+     * напечатано.
+     *
+     * Первые self::LEGEND пунктов («Телесный отклик»: параметры СМК и «не
+     * распознан») кладутся фиксированной сеткой по LEGEND_GROUP_COLS в
+     * строке — читаются одним блоком. Остальные пункты (достоверность,
+     * расхождение, фон) идут следом обычной обтекающей раскладкой.
+     *
+     * @return array{rows:int, items:array<int,array{row:int,x:float,c:?string,label:string}>}
+     */
+    private static function legendLayout(array $legend, float $minX, float $maxX): array {
+        $groupN = min(count(self::LEGEND), count($legend));
+        $cols = self::LEGEND_GROUP_COLS;
+        $colW = 0.0;
+        for ($i = 0; $i < $groupN; $i++) $colW = max($colW, self::legendWidth($legend[$i][1]));
+        $items = [];
+        for ($i = 0; $i < $groupN; $i++) {
+            [$c, $label] = $legend[$i];
+            $items[] = ['row' => intdiv($i, $cols), 'x' => $minX + ($i % $cols) * ($colW + 14), 'c' => $c, 'label' => $label];
+        }
+        $row = (int) ceil($groupN / $cols);
         $lx = $minX;
-        foreach ($legend as $k => [$c, $label]) {
+        for ($i = $groupN; $i < count($legend); $i++) {
+            [$c, $label] = $legend[$i];
             $width = self::legendWidth($label);
-            if ($k > 0 && $lx + $width > $maxX) { $lx = $minX; $rows++; }
+            if ($lx > $minX && $lx + $width > $maxX) { $lx = $minX; $row++; }
+            $items[] = ['row' => $row, 'x' => $lx, 'c' => $c, 'label' => $label];
             $lx += $width + 10;
         }
-        return $rows;
+        $rows = $items ? (max(array_column($items, 'row')) + 1) : 0;
+        return ['rows' => $rows, 'items' => $items];
+    }
+
+    /** Сколько строк займёт легенда при данной ширине — та же раскладка, что при отрисовке. */
+    private static function legendRows(array $legend, float $minX, float $maxX): int {
+        return max(1, self::legendLayout($legend, $minX, $maxX)['rows']);
+    }
+
+    /**
+     * Заголовок картинки, подогнанный под ширину: в PDF матрица почти втрое
+     * уже, чем на странице результата, и полная подпись при фиксированном
+     * кегле обрезалась с обеих сторон (текст центрирован, а SVG обрезает
+     * всё, что вышло за viewBox, — обрезка выходила симметричной). Сначала
+     * пробуем уменьшить кегль, и только если совсем не влезает даже
+     * минимальным — переносим по словам на вторую строку.
+     *
+     * @return array{lines:string[], fs:float}
+     */
+    private static function fitTitle(string $title, float $avail): array {
+        foreach ([14.0, 13.0, 12.0, 11.0, 10.0] as $fs) {
+            if (mb_strlen($title) * $fs * 0.62 <= $avail) return ['lines' => [$title], 'fs' => $fs];
+        }
+        $fs = 10.0;
+        $maxChars = max(10, (int) floor($avail / ($fs * 0.62)));
+        $lines = self::wrap($title, $maxChars);
+        return ['lines' => $lines ?: [$title], 'fs' => $fs];
     }
 
     /** Перенос пояснения по словам: SVG сам не переносит текст. */
