@@ -259,9 +259,15 @@ final class Chart {
             $poly[] = round($x, 1) . ',' . round($y, 1);
             $cogPts[$i] = [$x, $y];
         }
-        $svg[] = '<polygon points="' . implode(' ', $poly) . '" fill="' . self::COG_FILL . '" fill-opacity="' . self::COG_OPACITY . '" stroke="' . self::COG_STROKE . '" stroke-width="2.5"/>';
+        // pointer-events:none — иначе синий полигон (рисуется поверх физиологии,
+        // чтобы линия читалась сверху) перехватывал наведение на оранжевую точку
+        // физиологии под собой, и разбивка по каналам СМК при ховере не
+        // показывалась там, где кривые пересекались.
+        $svg[] = '<polygon points="' . implode(' ', $poly) . '" fill="' . self::COG_FILL . '" fill-opacity="' . self::COG_OPACITY
+               . '" stroke="' . self::COG_STROKE . '" stroke-width="2.5" pointer-events="none"/>';
         foreach ($cogPts as $i => [$x, $y]) {
-            $svg[] = '<circle cx="' . round($x, 1) . '" cy="' . round($y, 1) . '" r="4" fill="' . self::COG_STROKE . '" stroke="#ffffff" stroke-width="1.2"/>';
+            $svg[] = '<circle cx="' . round($x, 1) . '" cy="' . round($y, 1) . '" r="4" fill="' . self::COG_STROKE
+                   . '" stroke="#ffffff" stroke-width="1.2" pointer-events="none"/>';
             if (!$showCog) continue;
             // Подпись процента — ВНУТРЬ, к центру: наружу вдоль оси уже уходят
             // подписи «Знач.», иначе они наезжают друг на друга.
