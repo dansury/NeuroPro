@@ -842,8 +842,12 @@ final class Metrics {
      * а не её достоверность, и Z/X — это твёрдая позиция или обдумывание,
      * которые сами по себе не означают, что тело «зацепило» темой сильнее
      * обычного (требование заказчика, см. category()).
+     *
+     * Публичный: этим же правилом пользуется цифровой аватар клиента
+     * (Persona) — способ подачи не должен опираться на телесный сигнал,
+     * который сам расчёт считает ненадёжным.
      */
-    private static function physReliable(bool $sig, string $dominant): bool {
+    public static function physReliable(bool $sig, string $dominant): bool {
         return $sig || $dominant === 'Y';
     }
 

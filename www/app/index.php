@@ -29,6 +29,7 @@ try {
         case 'screenshot':    act_screenshot($cfg); break;
         case 'phys_save':     act_phys_save($cfg); break;
         case 'matrix_conf':   act_matrix_conf($cfg); break;
+        case 'persona_save':  act_persona_save($cfg); break;
         case 'interpret':     act_interpret($cfg); break;
         case 'result':        view_result($cfg, $h); break;
         case 'report':        view_report($cfg); break;
@@ -273,6 +274,11 @@ function view_result(array $cfg, callable $h): void {
       </div>
     <?php endif; ?>
     <?= phys_table_form($prof, $phys, (int)$p['id'], $h, $m, (string)($p['phys_image'] ?? '')) ?>
+    <!-- Цифровой аватар клиента идёт СРАЗУ за правкой физиологии: он считается
+         по тем самым данным, которые оператор только что проверил, и меняется
+         вместе с ними (требование заказчика — показывать профиль после правки
+         физиологии и давать его отредактировать). -->
+    <?= persona_card(Persona::sync((string)$prof['name']), (int)$p['id'], $h) ?>
     <form method="post" action="?p=interpret" id="interpform">
       <input type="hidden" name="id" value="<?= (int)$p['id'] ?>">
       <div class="row">
@@ -962,6 +968,18 @@ function act_matrix_conf(array $cfg): void {
     echo json_encode(['ok' => true, 'saved' => $saved], JSON_UNESCAPED_UNICODE);
 }
 
+/**
+ * Правка цифрового аватара: выбранные оператором значения признаков и заметка
+ * о подаче. Пустое значение признака = «как посчитано»: правка снимается, и
+ * дальше снова работает расчёт.
+ */
+function act_persona_save(array $cfg): void {
+    $id = (int)($_POST['id'] ?? 0);
+    $p = profile_row($id);
+    Persona::saveOverrides((string)$p['name'], (array)($_POST['trait'] ?? []), (string)($_POST['notes'] ?? ''));
+    redirect('?p=result&id=' . $id . '&ok=' . urlencode('Цифровой аватар клиента сохранён.'));
+}
+
 function act_interpret(array $cfg): void {
     $id = (int)($_POST['id'] ?? 0);
     $p = profile_row($id);
@@ -1332,6 +1350,72 @@ function phys_table_form(array $prof, ?array $phys, int $id, callable $h, ?array
 }
 
 /**
+ * ЦИФРОВОЙ АВАТАР КЛИЕНТА — как подавать ему материал отчёта.
+ *
+ * Карточка оператора, а НЕ часть отчёта: ни один её элемент не попадает ни в
+ * PDF, ни в письмо (требование заказчика — это внутренняя техническая
+ * информация). В нейросеть уходят только указания по форме подачи
+ * (Persona::promptBlock), и им запрещено проступать в тексте для клиента.
+ *
+ * Значение каждого признака считает код (Persona::traitsFor), рядом печатается
+ * основание — числа, по которым выбор сделан. Оператор может заменить любое
+ * значение своим: правка живёт до тех пор, пока он не вернёт «как посчитано»,
+ * и пересчёт после новых тестов её не затирает.
+ */
+function persona_card(array $persona, int $id, callable $h): string {
+    $traits = $persona['traits'] ?? [];
+    if (!$traits) return '';
+    ob_start(); ?>
+    <div class="card persona">
+      <h2>Цифровой аватар клиента — как подавать отчёт</h2>
+      <p class="muted">Способ подачи считает сервис по всем тестам этого клиента (не нейросеть):
+        объём, язык, тон, опора и форма. <b>В отчёт клиента отсюда не попадает ничего</b> —
+        это внутренняя информация оператора; нейросеть получает только указания по форме
+        и не имеет права их пересказывать. Не согласны с расчётом — поставьте своё значение,
+        оно переживёт пересчёт после следующих тестов.</p>
+      <form method="post" action="?p=persona_save">
+        <input type="hidden" name="id" value="<?= $id ?>">
+        <table class="grid">
+          <tr><th>Признак</th><th>Как подавать</th><th>Почему так посчитано</th></tr>
+          <?php foreach ($traits as $tk => $t): ?>
+          <tr>
+            <td><?= $h($t['title']) ?><span class="why"><?= $h($t['hint']) ?></span></td>
+            <td>
+              <select name="trait[<?= $h($tk) ?>]">
+                <option value="">как посчитано — <?= $h($t['computed_label']) ?></option>
+                <?php foreach (Persona::TRAITS[$tk]['options'] as $ok => $opt): ?>
+                  <option value="<?= $h($ok) ?>"<?= $t['override'] === $ok ? ' selected' : '' ?>><?= $h($opt['label']) ?></option>
+                <?php endforeach; ?>
+              </select>
+              <?php if ($t['override'] !== ''): ?><span class="why">правка оператора</span><?php endif; ?>
+            </td>
+            <td><?= $h($t['basis']) ?>
+              <?php if ($t['total'] > 1): ?>
+                <span class="why">то же в <?= (int)$t['agree'] ?> из <?= (int)$t['total'] ?> анализов клиента</span>
+              <?php endif; ?>
+            </td>
+          </tr>
+          <?php endforeach; ?>
+        </table>
+        <?php if (!empty($persona['values'])): ?>
+          <p class="muted">Что для клиента важно (ведущие темы его профиля — по весу показателя,
+            тому же, что задаёт размер кружка на матрице):
+            <b><?= $h(implode(', ', array_map(static fn ($v) => $v['label'], $persona['values']))) ?></b>.</p>
+        <?php endif; ?>
+        <label><span>Заметка о подаче — уходит в нейросеть как указание по форме (клиенту не показывается)</span>
+          <textarea name="notes" rows="2" placeholder="например: не любит длинных вступлений, просил без «психологических» слов"><?= $h($persona['notes']) ?></textarea></label>
+        <div class="row">
+          <span class="muted"><?= count($persona['sources'] ?? []) ?> анализ(ов) клиента в расчёте<?php
+            if ($persona['updated_at'] !== '') echo ', обновлён ' . $h($persona['updated_at']); ?>.</span>
+          <button class="btn sm" type="submit">Сохранить аватар</button>
+        </div>
+      </form>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+/**
  * Предупреждения о ненастроенных внешних сервисах — выводятся на каждой
  * странице приложения: оператор сразу видит, что OCR/нейросеть/почта
  * недоступны, а не получает молчаливо пустой результат.
@@ -1429,6 +1513,11 @@ function layout(string $title, string $body, callable $h, array $opts = []): voi
   .msg.warn{background:#fff8e6;border:1px solid #e8d29a;padding:10px;border-radius:6px;margin:10px 0}
   .msg.ok{background:#eaf7ee;border:1px solid #a8d5b5;padding:10px;border-radius:6px;margin:10px 0}
   tr.sig td{font-weight:bold}
+  /* Цифровой аватар: карточка оператора, поэтому она нарочно неяркая —
+     это служебные настройки подачи, а не часть отчёта. */
+  .persona .grid td{vertical-align:top}
+  .persona select{max-width:280px}
+  .persona .why{display:block;color:#8a949d;font-size:11px;line-height:1.5;margin-top:4px}
   input.num{width:80px;text-align:center} input.smk{width:96px;text-align:center}
   @media(max-width:760px){.grid2{grid-template-columns:1fr}}
   /* Двухколоночный результат: слева графики и правка физиологии, справа —
