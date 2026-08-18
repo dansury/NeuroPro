@@ -135,6 +135,24 @@ final class Db {
             $pdo->exec("ALTER TABLE profiles ADD COLUMN deleted_at TEXT");
         }
 
+        // ЦИФРОВОЙ АВАТАР КЛИЕНТА (Persona) — способ подачи отчёта: объём, язык,
+        // тон, опора, форма, чувствительность. Считается по всем анализам одного
+        // клиента, поэтому ключ здесь не profile_id, а нормализованное ФИО:
+        // человек приходит с несколькими тестами, и аватар у него один на всех.
+        // `traits_json` — расчёт, `overrides_json` — правка оператора (она
+        // переживает пересчёт), `notes` — его же заметка о подаче.
+        // В отчёт клиента ничего из этого не попадает: информация внутренняя.
+        $pdo->exec("CREATE TABLE IF NOT EXISTS personas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_key TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            traits_json TEXT,
+            overrides_json TEXT,
+            sources_json TEXT,
+            notes TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )");
+
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_versions_prompt ON prompt_versions(prompt_id)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_interp_version ON interpretations(prompt_version_id)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_interp_profile ON interpretations(profile_id)");

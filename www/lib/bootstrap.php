@@ -13,6 +13,7 @@ require_once __DIR__ . '/prompts.php';
 require_once __DIR__ . '/profile.php';
 require_once __DIR__ . '/phys.php';
 require_once __DIR__ . '/metrics.php';
+require_once __DIR__ . '/persona.php';
 require_once __DIR__ . '/report.php';
 require_once __DIR__ . '/interpret.php';
 require_once __DIR__ . '/trash.php';
