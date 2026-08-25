@@ -90,7 +90,26 @@ www/                  # ← веб-корень; ровно это зеркал�
   lib/
     config.php        # .env + ENV + overlay настроек из таблицы settings
                       #   AVAILABLE_MODELS — общий каталог моделей (Yandex AI Studio
-                      #   + OpenRouter), сгруппированный по `group` для UI
+                      #   + OpenRouter), сгруппированный по `group` для UI. В конце
+                      #   файла к нему БЕЗ СЕТИ подмешиваются бесплатные модели
+                      #   OpenRouter из settings (OpenRouterFree::decode)
+    openrouter_free.php # БЕСПЛАТНЫЕ модели OpenRouter по рейтингу shir-man
+                      #   (https://shir-man.com/api/free-llm/top-models). Оператор
+                      #   жмёт «Обновить бесплатные модели» в /setup.php →
+                      #   refresh() ходит по HTTP, нормализует ответ в строки
+                      #   каталога (id «free-…», provider openrouter, цена 0,
+                      #   группа «OpenRouter · бесплатные (shir-man)») и кладёт
+                      #   JSON в settings; config.php подмешивает их в
+                      #   AVAILABLE_MODELS при каждом запросе, не трогая сеть.
+                      #   Дальше такая модель ничем не отличается от вшитой: тот
+                      #   же слаг в запросе, та же «Проверить каталог OpenRouter»,
+                      #   те же цепочки LLM_DEFAULT_MODEL / LLM_FALLBACK_MODELS.
+                      #   Формат ответа сервиса нигде не зафиксирован, поэтому
+                      #   разбор терпимый: годится голый список слагов, массив
+                      #   объектов и объект-обёртка (models/data/items/result);
+                      #   обязателен только слаг вида «vendor/model».
+                      #   Ключ OpenRouter всё равно нужен — бесплатны модели, а
+                      #   не доступ к API
     db.php            # SQLite-схема: profiles, prompts, prompt_versions, interpretations
     excel.php         # Чтение .xls (OLE2+BIFF8) / .xlsx / .csv — чистый PHP
     profile.php       # Грид Excel → структурный профиль (метаданные, баллы шкал, тип теста: СМУ/ИЖС/Басса-Дарки)
@@ -343,7 +362,9 @@ www/                  # ← веб-корень; ровно это зеркал�
                       #   🗑 кладёт в корзину. Под списками — серая ссылка
                       #   «Удалённые» (?p=trash)
   setup.php           # Настройки провайдера/модели/OCR/SMTP/матрицы (пароль
-                      #   ADMIN_PASSWORD). Оформление — как у /app/
+                      #   ADMIN_PASSWORD). Оформление — как у /app/. Здесь же
+                      #   кнопки «Обновить бесплатные модели» / «Убрать из
+                      #   каталога» и адрес рейтинга (OPENROUTER_FREE_URL)
   assets/logo.png     # Логотип бренда
   tools/
     neuropro-watch.cmd# Наблюдатель папки для оператора (Windows, без PHP): кладётся в

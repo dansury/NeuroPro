@@ -154,6 +154,25 @@ if ($method === 'POST') {
             $probe = ['provider' => $prov, 'rows' => $rows];
             $messages[] = ['ok' => $ok > 0, 'text' => 'Проверка ' . $prov . ': доступно ' . $ok . ' из ' . count($rows) . '.'];
         }
+    } elseif (isset($_POST['free_models'])) {
+        // Бесплатные модели OpenRouter из рейтинга shir-man. Адрес, только что
+        // введённый в форму, сохраняем до запроса — иначе обновление шло бы по
+        // старому адресу (та же логика, что у ключей в проверке каталога).
+        $u = trim((string) ($_POST['OPENROUTER_FREE_URL'] ?? ''));
+        if ($u !== '') $store->setSetting('OPENROUTER_FREE_URL', $u);
+        $cfg_live = require __DIR__ . '/lib/config.php';
+        if ((string) $_POST['free_models'] === 'forget') {
+            OpenRouterFree::forget($store);
+            $messages[] = ['ok' => true, 'text' => '✅ Бесплатные модели убраны из каталога.'];
+        } else {
+            try {
+                $rows = OpenRouterFree::refresh($cfg_live, $store);
+                $messages[] = ['ok' => true, 'text' => '✅ Рейтинг обновлён: ' . count($rows) . ' бесплатных моделей'
+                    . ($rows ? ' (первая — ' . $rows[0]['full_id'] . ')' : '') . '.'];
+            } catch (Throwable $e) {
+                $messages[] = ['ok' => false, 'text' => '⚠️ Рейтинг бесплатных моделей не получен: ' . $e->getMessage()];
+            }
+        }
     } elseif (isset($_POST['smtp_test'])) {
         // Test letter via the CURRENT saved settings (re-read overlay).
         $cfg_live = require __DIR__ . '/lib/config.php';
@@ -194,6 +213,7 @@ if ($method === 'POST') {
             'LLM_VISION_MODEL', 'LLM_FALLBACK_MODEL', 'YANDEX_FALLBACK_MODEL',
             'LLM_OCR_MODELS', 'SCREENSHOT_MODEL', 'YANDEX_OCR_MODEL',
             'OPENROUTER_API_KEY', 'YANDEX_API_KEY', 'YANDEX_FOLDER_ID',
+            'OPENROUTER_FREE_URL',
             'ADMIN_EMAIL', 'ERROR_EMAIL',
             'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME',
             'ADMIN_PASSWORD',
@@ -330,6 +350,37 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
       <?php endforeach; ?>
     </div>
   <?php endif; ?>
+  <?php
+  $free_rows   = OpenRouterFree::decode((string) ($cfg['OPENROUTER_FREE_MODELS'] ?? ''));
+  $free_synced = (string) ($cfg['OPENROUTER_FREE_SYNCED_AT'] ?? '');
+  ?>
+  <h3 style="margin:18px 0 6px">Бесплатные модели OpenRouter (рейтинг shir-man)</h3>
+  <p class="lede" style="margin:0 0 8px">
+    Сервис <code>shir-man.com</code> держит верхушку бесплатных моделей OpenRouter. Обновление
+    дописывает их в каталог отдельной группой «<?= $h(OpenRouterFree::GROUP) ?>» — дальше они ничем не
+    отличаются от вшитых: те же выпадающие списки, та же проверка каталога, те же запасные цепочки.
+    Ключ OpenRouter всё равно нужен: бесплатны сами модели, а не доступ к API.
+    <?php if ($free_rows): ?>
+      <br>Сейчас в каталоге: <b><?= count($free_rows) ?></b><?= $free_synced !== '' ? ', обновлено ' . $h($free_synced) : '' ?>.
+    <?php else: ?>
+      <br>Сейчас бесплатных моделей в каталоге нет.
+    <?php endif; ?>
+  </p>
+  <label><span>Адрес рейтинга</span><input type="text" name="OPENROUTER_FREE_URL" placeholder="<?= $h($eff('OPENROUTER_FREE_URL') ?: OpenRouterFree::DEFAULT_URL) ?>"></label>
+  <div class="row">
+    <button class="ghost" type="submit" name="free_models" value="refresh" formnovalidate>Обновить бесплатные модели</button>
+    <?php if ($free_rows): ?>
+      <button class="ghost" type="submit" name="free_models" value="forget" formnovalidate>Убрать из каталога</button>
+    <?php endif; ?>
+  </div>
+  <?php if ($free_rows): ?>
+    <div class="probe">
+      <?php foreach ($free_rows as $r): ?>
+        <div class="probe-row"><span><?= $h((string) $r['label']) ?> <code><?= $h((string) $r['full_id']) ?></code></span><em><?= $h((string) $r['id']) ?></em></div>
+      <?php endforeach; ?>
+    </div>
+  <?php endif; ?>
+
   <label><span>Запасные модели (короткие id через запятую; пробуются после выбранной)</span><input type="text" name="LLM_FALLBACK_MODELS" placeholder="<?= $h($eff('LLM_FALLBACK_MODELS') ?: 'yandexgpt-lite,deepseek-v3') ?>"></label>
   <label><span>Vision-модель для PDF OCR (OpenRouter full_id)</span><input type="text" name="LLM_VISION_MODEL" placeholder="<?= $h($eff('LLM_VISION_MODEL') ?: 'google/gemini-2.0-flash-001') ?>"></label>
   <label><span>OpenRouter fallback-модель</span><input type="text" name="LLM_FALLBACK_MODEL" placeholder="<?= $h($eff('LLM_FALLBACK_MODEL') ?: 'openrouter/auto') ?>"></label>

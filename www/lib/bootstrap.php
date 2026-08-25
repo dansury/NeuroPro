@@ -18,6 +18,7 @@ require_once __DIR__ . '/report.php';
 require_once __DIR__ . '/interpret.php';
 require_once __DIR__ . '/trash.php';
 require_once __DIR__ . '/settings_store.php';
+require_once __DIR__ . '/openrouter_free.php';
 
 function np_boot(): array {
     static $cfg = null;

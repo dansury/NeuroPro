@@ -8,6 +8,10 @@
  * No secrets in code — supply keys via ENV or setup.php.
  */
 
+// Каталог бесплатных моделей OpenRouter (рейтинг shir-man) подмешивается в
+// AVAILABLE_MODELS в конце файла — отсюда нужен только разбор сохранённого JSON.
+require_once __DIR__ . '/openrouter_free.php';
+
 // ── .env ──────────────────────────────────────────────────────────────────
 // Файл .env кладётся НАД веб-корнем (рядом с каталогом data/): локально это
 // корень репозитория (веб-корень — www/), на хостинге — каталог над корнем
@@ -111,6 +115,9 @@ if (!function_exists('cfg_settings_whitelist')) {
             'LLM_PROVIDER', 'LLM_DEFAULT_MODEL', 'LLM_PROVIDER_PRIORITY',
             'LLM_FALLBACK_MODELS',
             'OPENROUTER_API_KEY', 'LLM_VISION_MODEL', 'LLM_FALLBACK_MODEL',
+            // Бесплатные модели OpenRouter по рейтингу shir-man: адрес рейтинга,
+            // сохранённый каталог (JSON строк AVAILABLE_MODELS) и отметка обновления.
+            'OPENROUTER_FREE_URL', 'OPENROUTER_FREE_MODELS', 'OPENROUTER_FREE_SYNCED_AT',
             'LLM_OCR_MODELS', 'SCREENSHOT_MODEL', 'YANDEX_FALLBACK_MODEL',
             'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'YANDEX_LLM_URL',
             'YANDEX_OCR_URL', 'YANDEX_OCR_MODEL', 'YANDEX_OCR_ENABLED',
@@ -141,6 +148,15 @@ $config = [
     /* ── OpenRouter ── (supply key via ENV or setup.php) */
     'OPENROUTER_API_KEY'    => cfg_env('OPENROUTER_API_KEY', ''),
     'OPENROUTER_URL'        => 'https://openrouter.ai/api/v1/chat/completions',
+    /* ── Бесплатные модели OpenRouter (рейтинг shir-man) ──────────────────
+       Список моделей с нулевой ценой у OpenRouter длинный, а какие из них
+       годятся для длинного текста — по нему не видно. Рейтинг shir-man держит
+       эту верхушку за нас. Оператор обновляет его кнопкой в /setup.php:
+       OpenRouterFree::refresh() кладёт УЖЕ НОРМАЛИЗОВАННЫЕ строки каталога в
+       settings, а config.php подмешивает их в AVAILABLE_MODELS без сети. */
+    'OPENROUTER_FREE_URL'   => cfg_env('OPENROUTER_FREE_URL', OpenRouterFree::DEFAULT_URL),
+    'OPENROUTER_FREE_MODELS'    => '',   // JSON; заполняется из settings
+    'OPENROUTER_FREE_SYNCED_AT' => '',   // когда рейтинг забирали в последний раз
     'LLM_VISION_MODEL'      => cfg_env('LLM_VISION_MODEL', 'google/gemini-2.0-flash-001'),
     'LLM_FALLBACK_MODEL'    => cfg_env('LLM_FALLBACK_MODEL', 'openrouter/auto'),
     // Страховочная модель Яндекса: yandexgpt доступен в любом каталоге, тогда как
@@ -370,6 +386,26 @@ $config = [
         }
     } catch (Throwable $e) {
         // DB unavailable / table missing → keep env + hardcoded values.
+    }
+})($config);
+
+/**
+ * Подмешать бесплатные модели OpenRouter (рейтинг shir-man) в каталог. Строки
+ * уже нормализованы на записи, поэтому здесь — ни сети, ни разбора формата:
+ * только json_decode и защита от столкновения id/слага с вшитой моделью.
+ */
+(static function (array &$config): void {
+    $rows = OpenRouterFree::decode((string) ($config['OPENROUTER_FREE_MODELS'] ?? ''));
+    if (!$rows) return;
+    $ids = $slugs = [];
+    foreach ($config['AVAILABLE_MODELS'] as $r) {
+        $ids[(string) ($r['id'] ?? '')] = true;
+        $slugs[(string) ($r['full_id'] ?? '')] = true;
+    }
+    foreach ($rows as $r) {
+        if (isset($ids[(string) $r['id']]) || isset($slugs[(string) $r['full_id']])) continue;
+        $ids[(string) $r['id']] = $slugs[(string) $r['full_id']] = true;
+        $config['AVAILABLE_MODELS'][] = $r;
     }
 })($config);
 
