@@ -154,6 +154,28 @@ if ($method === 'POST') {
             $probe = ['provider' => $prov, 'rows' => $rows];
             $messages[] = ['ok' => $ok > 0, 'text' => 'Проверка ' . $prov . ': доступно ' . $ok . ' из ' . count($rows) . '.'];
         }
+    } elseif (isset($_POST['model_catalog'])) {
+        // Живой каталог моделей. Ключи, только что введённые в форму, сохраняем
+        // до запроса — иначе каталог тянулся бы по старым учётным данным
+        // (та же логика, что у проверки каталога).
+        foreach (['OPENROUTER_API_KEY', 'YANDEX_API_KEY', 'YANDEX_FOLDER_ID'] as $k) {
+            $v = trim((string) ($_POST[$k] ?? ''));
+            if ($v !== '') $store->setSetting($k, $v);
+        }
+        $cfg_live = require __DIR__ . '/lib/config.php';
+        if ((string) $_POST['model_catalog'] === 'forget') {
+            ModelCatalog::forget($store);
+            $messages[] = ['ok' => true, 'text' => '✅ Живой каталог забыт — в списках остались вшитые модели.'];
+        } else {
+            try {
+                $rep = ModelCatalog::refresh($cfg_live, $store);
+                $messages[] = ['ok' => true, 'text' => '✅ Каталог обновлён: ' . (int) $rep['rows'] . ' моделей'
+                    . ' (OpenRouter: ' . (is_int($rep['openrouter']) ? $rep['openrouter'] : '⛔ ' . $rep['openrouter'])
+                    . ', Yandex: ' . (is_int($rep['yandex']) ? $rep['yandex'] : '⛔ ' . $rep['yandex']) . ').'];
+            } catch (Throwable $e) {
+                $messages[] = ['ok' => false, 'text' => '⚠️ Каталог моделей не получен: ' . $e->getMessage()];
+            }
+        }
     } elseif (isset($_POST['free_models'])) {
         // Бесплатные модели OpenRouter из рейтинга shir-man. Адрес, только что
         // введённый в форму, сохраняем до запроса — иначе обновление шло бы по
@@ -209,7 +231,7 @@ if ($method === 'POST') {
         // String settings. Empty values never overwrite existing.
         $map = [
             'LLM_PROVIDER', 'LLM_PROVIDER_PRIORITY', 'LLM_DEFAULT_MODEL',
-            'LLM_FALLBACK_MODELS',
+            'LLM_FALLBACK_MODE', 'LLM_FALLBACK_MODELS', 'MODEL_CATALOG_TTL_MIN',
             'LLM_VISION_MODEL', 'LLM_FALLBACK_MODEL', 'YANDEX_FALLBACK_MODEL',
             'LLM_OCR_MODELS', 'SCREENSHOT_MODEL', 'YANDEX_OCR_MODEL',
             'OPENROUTER_API_KEY', 'YANDEX_API_KEY', 'YANDEX_FOLDER_ID',
@@ -229,6 +251,11 @@ if ($method === 'POST') {
         $messages[] = ['ok' => true, 'text' => '✅ Сохранено: ' . implode(', ', $edited)];
     }
 }
+
+// Каталог моделей обновляется при заходе в настройки: кэш старше
+// MODEL_CATALOG_TTL_MIN минут — сходить к провайдерам, иначе ничего не делать.
+// Ошибка сети страницу не роняет: остаётся прежний список, причина видна ниже.
+ModelCatalog::maybeRefresh(require __DIR__ . '/lib/config.php', $store);
 
 // Re-load config so freshly-saved overlay values render in the "current" hints.
 $cfg = require __DIR__ . '/lib/config.php';
@@ -313,14 +340,19 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
       </select>
     </label>
   </div>
-  <label><span>Модель по умолчанию (из AVAILABLE_MODELS)</span>
+  <label><span>Модель по умолчанию (каталог: вшитый список + то, что отдал провайдер)</span>
     <?php
     $model_cur = $eff('LLM_DEFAULT_MODEL');
     $groups = LLM::modelsByGroup($cfg);
-    // Цена справочная: ₽ за 1 млн токенов (вход/выход), 0 — неизвестна.
+    // Цена справочная, за 1 млн токенов (вход/выход). У вшитых строк — ₽,
+    // у живых приходит от провайдера в долларах; курс не выдумываем.
     $price = static function (array $m): string {
         $in = (float) ($m['price_in'] ?? 0); $out = (float) ($m['price_out'] ?? 0);
-        return ($in > 0 || $out > 0) ? sprintf(' · ~%s/%s ₽ за 1M', rtrim(rtrim(number_format($in, 1, '.', ''), '0'), '.'), rtrim(rtrim(number_format($out, 1, '.', ''), '0'), '.')) : '';
+        $num = static fn (float $v) => rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.');
+        if ($in > 0 || $out > 0) return sprintf(' · ~%s/%s ₽ за 1M', $num($in), $num($out));
+        $ui = (float) ($m['price_usd_in'] ?? 0); $uo = (float) ($m['price_usd_out'] ?? 0);
+        if ($ui > 0 || $uo > 0) return sprintf(' · $%s/$%s за 1M', $num($ui), $num($uo));
+        return !empty($m['free']) ? ' · бесплатно' : '';
     };
     ?>
     <select name="LLM_DEFAULT_MODEL">
@@ -335,7 +367,34 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
       <?php endforeach; ?>
     </select>
   </label>
-  <p class="lede" style="margin:-4px 0 8px">Каталог общий для всех установок. Что реально доступно вашему ключу — покажет проверка ниже; недоступная модель не ломает работу, запрос уходит следующему кандидату цепочки.</p>
+  <p class="lede" style="margin:-4px 0 8px">Вшитый каталог общий для всех установок, живые модели провайдера дописываются к нему группами «(каталог)». Что реально доступно вашему ключу — покажет проверка ниже; недоступная модель не ломает работу, запрос уходит следующему кандидату цепочки.</p>
+  <?php
+  $live_rows   = ModelCatalog::decode((string) ($cfg['MODEL_CATALOG_MODELS'] ?? ''));
+  $live_synced = (string) ($cfg['MODEL_CATALOG_SYNCED_AT'] ?? '');
+  $live_error  = (string) ($cfg['MODEL_CATALOG_ERROR'] ?? '');
+  $live_ttl    = (int) ($cfg['MODEL_CATALOG_TTL_MIN'] ?? ModelCatalog::TTL_MIN);
+  ?>
+  <h3 style="margin:18px 0 6px">Живой каталог моделей провайдеров</h3>
+  <p class="lede" style="margin:0 0 8px">
+    Список тянется прямо у провайдеров (OpenRouter <code>GET /models</code>, Yandex <code>GET /v1/models</code>)
+    и кэшируется в настройках. Каталог обновляется сам при заходе на эту страницу, если кэш старше
+    <?= $live_ttl ?> мин; кнопка ниже обновляет сразу. Пока обновления не было — работает вшитый список.
+    <?php if ($live_rows): ?>
+      <br>Сейчас живых моделей: <b><?= count($live_rows) ?></b><?= $live_synced !== '' ? ', обновлено ' . $h($live_synced) : '' ?>.
+    <?php else: ?>
+      <br>Живого каталога пока нет — в списках только вшитые модели.
+    <?php endif; ?>
+    <?php if ($live_error !== ''): ?>
+      <br><span style="color:#b3203b">Последняя попытка: <?= $h(mb_substr($live_error, 0, 200)) ?></span>
+    <?php endif; ?>
+  </p>
+  <label><span>Срок годности кэша каталога, мин</span><input type="text" name="MODEL_CATALOG_TTL_MIN" placeholder="<?= $h((string) $live_ttl) ?>"></label>
+  <div class="row">
+    <button class="ghost" type="submit" name="model_catalog" value="refresh" formnovalidate>Обновить каталог моделей</button>
+    <?php if ($live_rows): ?>
+      <button class="ghost" type="submit" name="model_catalog" value="forget" formnovalidate>Забыть живой каталог</button>
+    <?php endif; ?>
+  </div>
   <div class="row">
     <button class="ghost" type="submit" name="models_probe" value="yandex" formnovalidate>Проверить каталог Yandex</button>
     <button class="ghost" type="submit" name="models_probe" value="openrouter" formnovalidate>Проверить каталог OpenRouter</button>
@@ -381,6 +440,30 @@ $ocr_models_eff = $eff('LLM_OCR_MODELS');
     </div>
   <?php endif; ?>
 
+  <h3 style="margin:18px 0 6px">Запасная модель</h3>
+  <?php
+  // Во что развернётся «авто» для выбранной сейчас модели — показываем прямо
+  // здесь: у нерегулярного слага (yandexgpt, gpt-4o) версии нет, и запас
+  // берётся из списка ниже.
+  LLM::init($cfg);
+  $auto_rows = LLM::autoFallbackRows($model_cur);
+  ?>
+  <label><span>Что пробовать после выбранной модели</span>
+    <select name="LLM_FALLBACK_MODE">
+      <option value="auto" <?= $eff('LLM_FALLBACK_MODE') !== 'manual' ? 'selected' : '' ?>>авто — более новая версия той же модели, затем список</option>
+      <option value="manual" <?= $eff('LLM_FALLBACK_MODE') === 'manual' ? 'selected' : '' ?>>только список ниже</option>
+    </select>
+  </label>
+  <p class="lede" style="margin:-4px 0 8px">
+    «Авто» ищет в каталоге ту же модель более новой версии (<code>gpt-4.1</code> → <code>gpt-5.1</code>,
+    <code>claude-sonnet-4</code> → <code>claude-sonnet-4.5</code>) — поэтому обновлённый живой каталог
+    сразу даёт свежий запас.
+    <?php if ($auto_rows): ?>
+      Для выбранной модели это: <b><?= $h(implode(', ', array_map(static fn ($r) => (string) $r['full_id'], array_slice($auto_rows, 0, 3)))) ?></b>.
+    <?php else: ?>
+      У выбранной модели версия в слаге не читается или новее ничего нет — сработает список ниже.
+    <?php endif; ?>
+  </p>
   <label><span>Запасные модели (короткие id через запятую; пробуются после выбранной)</span><input type="text" name="LLM_FALLBACK_MODELS" placeholder="<?= $h($eff('LLM_FALLBACK_MODELS') ?: 'yandexgpt-lite,deepseek-v3') ?>"></label>
   <label><span>Vision-модель для PDF OCR (OpenRouter full_id)</span><input type="text" name="LLM_VISION_MODEL" placeholder="<?= $h($eff('LLM_VISION_MODEL') ?: 'google/gemini-2.0-flash-001') ?>"></label>
   <label><span>OpenRouter fallback-модель</span><input type="text" name="LLM_FALLBACK_MODEL" placeholder="<?= $h($eff('LLM_FALLBACK_MODEL') ?: 'openrouter/auto') ?>"></label>
