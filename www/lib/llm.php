@@ -8,8 +8,9 @@
  *    URIs, OpenAI-compatible endpoint) and OpenRouter (Bearer).
  *  - Per-session model / provider overrides (LLM::setModelOverride / setProviderOverride).
  *  - Config-driven fallback chain: выбранная модель у каждого провайдера
- *    (LLM_PROVIDER_PRIORITY), затем LLM_FALLBACK_MODELS — тоже по провайдерам.
- *    Слаг модели никогда не уходит чужому провайдеру.
+ *    (LLM_PROVIDER_PRIORITY), затем — при LLM_FALLBACK_MODE=auto — БОЛЕЕ НОВАЯ
+ *    ВЕРСИЯ той же модели из каталога (ModelCatalog::newerSiblings), и только
+ *    после этого LLM_FALLBACK_MODELS. Слаг никогда не уходит чужому провайдеру.
  *  - PDF OCR via OpenRouter vision models (file-parser plugin strategies +
  *    native) and Yandex Vision OCR, in operator-chosen priority order.
  *  - Generic chat entry points: chatText() and chatJson().
@@ -18,6 +19,8 @@
  *   $cfg   — array from config.php
  *   $store — optional object with logLLMCall(...) (no-op if absent)
  */
+
+require_once __DIR__ . '/model_catalog.php';   // версии моделей для auto-fallback
 
 final class LLM {
     private static ?array $cfg = null;
@@ -153,6 +156,22 @@ final class LLM {
         return $out;
     }
 
+    /** Режим запаса: 'auto' — сначала более новая версия той же модели, 'manual' — только список. */
+    private static function fallbackMode(): string {
+        $m = strtolower(trim((string) (self::cfg()['LLM_FALLBACK_MODE'] ?? 'auto')));
+        return $m === 'manual' ? 'manual' : 'auto';
+    }
+
+    /** Семейства более новых версий выбранной модели — запас по умолчанию.
+     *  $shortId не задан — берётся модель по умолчанию (нужно /setup.php,
+     *  чтобы показать оператору, во что развернётся «авто»). */
+    public static function autoFallbackRows(?string $shortId = null): array {
+        $cfg = self::cfg();
+        $row = self::findModel($shortId ?? (string) ($cfg['LLM_DEFAULT_MODEL'] ?? ''));
+        if ($row === null) return [];
+        return ModelCatalog::newerSiblings($row, (array) ($cfg['AVAILABLE_MODELS'] ?? []));
+    }
+
     /** Семейства запасных моделей из LLM_FALLBACK_MODELS (короткие id). */
     private static function fallbackFamilies(): array {
         $raw = (string) (self::cfg()['LLM_FALLBACK_MODELS'] ?? '');
@@ -187,6 +206,17 @@ final class LLM {
         $primaryFamily = self::modelFamily($primary);
 
         $families = [$primaryFamily];
+        // Запас по умолчанию — более новая версия ТОЙ ЖЕ модели (gpt-4.1 → gpt-5.1).
+        // Её ищет ModelCatalog по слагу, поэтому живой каталог провайдера сразу
+        // расширяет запас: новые версии появляются в списке без правки кода.
+        if (self::fallbackMode() === 'auto') {
+            foreach (ModelCatalog::newerSiblings($primary, (array) ($cfg['AVAILABLE_MODELS'] ?? [])) as $row) {
+                $fam = self::modelFamily($row);
+                if (!in_array($fam, $families, true)) $families[] = $fam;
+            }
+        }
+        // Явно назначенный оператором запас пробуется после — он же единственный
+        // в режиме manual.
         foreach (self::fallbackFamilies() as $fam) {
             if (!in_array($fam, $families, true)) $families[] = $fam;
         }

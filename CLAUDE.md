@@ -91,8 +91,25 @@ www/                  # ← веб-корень; ровно это зеркал�
     config.php        # .env + ENV + overlay настроек из таблицы settings
                       #   AVAILABLE_MODELS — общий каталог моделей (Yandex AI Studio
                       #   + OpenRouter), сгруппированный по `group` для UI. В конце
-                      #   файла к нему БЕЗ СЕТИ подмешиваются бесплатные модели
-                      #   OpenRouter из settings (OpenRouterFree::decode)
+                      #   файла к нему БЕЗ СЕТИ подмешиваются живой каталог
+                      #   провайдеров (ModelCatalog::decode/merge) и бесплатные
+                      #   модели OpenRouter из settings (OpenRouterFree::decode)
+    model_catalog.php # ЖИВОЙ каталог моделей: список тянется прямо у провайдера
+                      #   (OpenRouter GET /api/v1/models, Yandex GET /v1/models) и
+                      #   кэшируется в settings. /setup.php при заходе зовёт
+                      #   maybeRefresh(): кэш старше MODEL_CATALOG_TTL_MIN минут —
+                      #   сходить по сети, иначе не трогать; ошибка сети страницу не
+                      #   роняет — остаётся прежний список, причина показывается
+                      #   оператору. merge() не переписывает вшитые строки: знакомый
+                      #   слаг только помечается доступным (`live`), незнакомая
+                      #   модель дописывается группой «… (каталог)» — сохранённый
+                      #   LLM_DEFAULT_MODEL не ломается. Цена живой строки приходит
+                      #   в долларах (price_usd_in/out), курс не выдумывается.
+                      #   Здесь же разбор ВЕРСИИ из слага (lineage/newerSiblings):
+                      #   «openai/gpt-4.1» → линейка «gpt-*» + версия 4.1, на этом
+                      #   построен запас по умолчанию — более новая версия ТОЙ ЖЕ
+                      #   модели. Версия в слаге не читается (yandexgpt, gpt-4o) —
+                      #   запаса нет, работает список LLM_FALLBACK_MODELS
     openrouter_free.php # БЕСПЛАТНЫЕ модели OpenRouter по рейтингу shir-man
                       #   (https://shir-man.com/api/free-llm/top-models). Оператор
                       #   жмёт «Обновить бесплатные модели» в /setup.php →
@@ -205,8 +222,12 @@ www/                  # ← веб-корень; ровно это зеркал�
     ocr (в llm.php)   # LLM::ocrImage() — Yandex Vision OCR скриншота
     llm.php           # Провайдеры Yandex (по умолчанию) + OpenRouter, fallback, OCR
                       #   Цепочка: выбранная модель у каждого провайдера
-                      #   (LLM_PROVIDER_PRIORITY), затем LLM_FALLBACK_MODELS.
-                      #   Слаг модели никогда не уходит чужому провайдеру.
+                      #   (LLM_PROVIDER_PRIORITY), затем — при LLM_FALLBACK_MODE=auto
+                      #   (по умолчанию) — БОЛЕЕ НОВАЯ ВЕРСИЯ той же модели
+                      #   (ModelCatalog::newerSiblings), и только потом
+                      #   LLM_FALLBACK_MODELS. LLM_FALLBACK_MODE=manual оставляет
+                      #   один список. Слаг модели никогда не уходит чужому
+                      #   провайдеру.
                       #   LLM::recognizeSignificance() режет скриншот таблицы значимости
                       #   на горизонтальные полосы по строкам (ext-gd, sliceSignificanceImage,
                       #   ≤6 строк на кусок + небольшой нахлёст) и слегка увеличивает
@@ -363,6 +384,11 @@ www/                  # ← веб-корень; ровно это зеркал�
                       #   «Удалённые» (?p=trash)
   setup.php           # Настройки провайдера/модели/OCR/SMTP/матрицы (пароль
                       #   ADMIN_PASSWORD). Оформление — как у /app/. Здесь же
+                      #   живой каталог моделей (обновляется САМ при заходе, если
+                      #   кэш старше MODEL_CATALOG_TTL_MIN; кнопки «Обновить каталог
+                      #   моделей» / «Забыть живой каталог»), выбор запаса
+                      #   (LLM_FALLBACK_MODE: авто — более новая версия той же
+                      #   модели, показывается прямо под списком; или свой список),
                       #   кнопки «Обновить бесплатные модели» / «Убрать из
                       #   каталога» и адрес рейтинга (OPENROUTER_FREE_URL)
   assets/logo.png     # Логотип бренда

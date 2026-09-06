@@ -11,6 +11,9 @@
 // Каталог бесплатных моделей OpenRouter (рейтинг shir-man) подмешивается в
 // AVAILABLE_MODELS в конце файла — отсюда нужен только разбор сохранённого JSON.
 require_once __DIR__ . '/openrouter_free.php';
+// Живой каталог моделей провайдеров (кэш в settings) — тоже подмешивается в
+// AVAILABLE_MODELS в конце файла, без сети.
+require_once __DIR__ . '/model_catalog.php';
 
 // ── .env ──────────────────────────────────────────────────────────────────
 // Файл .env кладётся НАД веб-корнем (рядом с каталогом data/): локально это
@@ -118,6 +121,10 @@ if (!function_exists('cfg_settings_whitelist')) {
             // Бесплатные модели OpenRouter по рейтингу shir-man: адрес рейтинга,
             // сохранённый каталог (JSON строк AVAILABLE_MODELS) и отметка обновления.
             'OPENROUTER_FREE_URL', 'OPENROUTER_FREE_MODELS', 'OPENROUTER_FREE_SYNCED_AT',
+            // Живой каталог моделей: кэш, отметка обновления, ошибка последнего
+            // обращения и срок годности кэша в минутах.
+            'MODEL_CATALOG_MODELS', 'MODEL_CATALOG_SYNCED_AT', 'MODEL_CATALOG_ERROR',
+            'MODEL_CATALOG_TTL_MIN', 'LLM_FALLBACK_MODE',
             'LLM_OCR_MODELS', 'SCREENSHOT_MODEL', 'YANDEX_FALLBACK_MODEL',
             'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'YANDEX_LLM_URL',
             'YANDEX_OCR_URL', 'YANDEX_OCR_MODEL', 'YANDEX_OCR_ENABLED',
@@ -144,6 +151,11 @@ $config = [
     // Другие модели (короткие id из AVAILABLE_MODELS), которые пробуются только
     // после того, как выбранная модель не отработала ни у одного провайдера.
     'LLM_FALLBACK_MODELS'   => cfg_env('LLM_FALLBACK_MODELS', 'yandexgpt-lite,deepseek-v3'),
+    // Что пробовать сразу после выбранной модели:
+    //   auto   — более НОВУЮ ВЕРСИЮ той же модели из каталога (gpt-4.1 → gpt-5.1),
+    //            а если такой нет — сразу список LLM_FALLBACK_MODELS;
+    //   manual — только LLM_FALLBACK_MODELS.
+    'LLM_FALLBACK_MODE'     => cfg_env('LLM_FALLBACK_MODE', 'auto'),   // 'auto' | 'manual'
 
     /* ── OpenRouter ── (supply key via ENV or setup.php) */
     'OPENROUTER_API_KEY'    => cfg_env('OPENROUTER_API_KEY', ''),
@@ -157,6 +169,15 @@ $config = [
     'OPENROUTER_FREE_URL'   => cfg_env('OPENROUTER_FREE_URL', OpenRouterFree::DEFAULT_URL),
     'OPENROUTER_FREE_MODELS'    => '',   // JSON; заполняется из settings
     'OPENROUTER_FREE_SYNCED_AT' => '',   // когда рейтинг забирали в последний раз
+    /* ── Живой каталог моделей ────────────────────────────────────────────
+       Список моделей тянется прямо у провайдеров (OpenRouter GET /models,
+       Яндекс GET /v1/models) и кэшируется в settings. /setup.php обновляет
+       кэш при загрузке, если он старше MODEL_CATALOG_TTL_MIN минут; здесь —
+       только разбор сохранённого JSON, без сети (ModelCatalog). */
+    'MODEL_CATALOG_MODELS'    => '',   // JSON строк каталога; заполняется из settings
+    'MODEL_CATALOG_SYNCED_AT' => '',   // когда каталог забирали в последний раз
+    'MODEL_CATALOG_ERROR'     => '',   // причина последней неудачи, для /setup.php
+    'MODEL_CATALOG_TTL_MIN'   => cfg_env('MODEL_CATALOG_TTL_MIN', (string) ModelCatalog::TTL_MIN),
     'LLM_VISION_MODEL'      => cfg_env('LLM_VISION_MODEL', 'google/gemini-2.0-flash-001'),
     'LLM_FALLBACK_MODEL'    => cfg_env('LLM_FALLBACK_MODEL', 'openrouter/auto'),
     // Страховочная модель Яндекса: yandexgpt доступен в любом каталоге, тогда как
@@ -394,6 +415,16 @@ $config = [
  * уже нормализованы на записи, поэтому здесь — ни сети, ни разбора формата:
  * только json_decode и защита от столкновения id/слага с вшитой моделью.
  */
+/**
+ * Подмешать ЖИВОЙ каталог провайдеров. Строки нормализованы на записи, поэтому
+ * здесь ни сети, ни разбора формата: вшитая строка с тем же слагом получает
+ * пометку «доступна», незнакомая модель дописывается в конец каталога.
+ */
+(static function (array &$config): void {
+    $live = ModelCatalog::decode((string) ($config['MODEL_CATALOG_MODELS'] ?? ''));
+    if ($live) $config['AVAILABLE_MODELS'] = ModelCatalog::merge($config['AVAILABLE_MODELS'], $live);
+})($config);
+
 (static function (array &$config): void {
     $rows = OpenRouterFree::decode((string) ($config['OPENROUTER_FREE_MODELS'] ?? ''));
     if (!$rows) return;
