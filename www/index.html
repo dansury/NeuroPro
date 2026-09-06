@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>НейроПРО — нейродиагностика мозга по методу биологической обратной связи</title>
+<meta name="description" content="НейроПРО: аппаратная нейродиагностика на сертифицированном оборудовании БОС. 40 минут исследования, разбор с аналитиком, отчёт с рекомендациями за 3–5 дней и курс нейротренингов. Более 1300 диагностик.">
+<link rel="icon" href="assets/favicon.png" type="image/png">
+<meta property="og:title" content="НейроПРО — лаборатория повышения личной эффективности">
+<meta property="og:description" content="Объективная картина работы вашей нервной системы за 40 минут: биоэлектрическая активность, функциональная асимметрия, стрессоустойчивость, ресурс.">
+<meta property="og:image" content="assets/hero.jpg">
+<meta property="og:type" content="website">
+<style>
+:root{
+  --ink:#1c1418; --ink2:#4a3a40; --muted:#7a6a70; --faint:#9c8d92;
+  --crimson:#c4283f; --crimson-d:#a31e33; --plum:#5e2a38; --rose:#e38795;
+  --pink50:#fdf4f5; --pink100:#f8e6e9; --line:#ecdfe2; --line2:#f4ebed;
+  --bg:#ffffff; --bg2:#fbf8f8;
+  --maxw:1160px; --r:16px;
+  --sh:0 1px 2px rgba(94,42,56,.05), 0 12px 32px -18px rgba(94,42,56,.28);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;overflow-x:clip}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Inter","Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+  font-size:17px;line-height:1.62;-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+a{color:inherit}
+.wrap{width:min(100% - 40px,var(--maxw));margin-inline:auto}
+
+/* header */
+header{position:sticky;top:0;z-index:60;background:rgba(255,255,255,.86);backdrop-filter:blur(12px);
+  border-bottom:1px solid transparent;transition:border-color .3s,box-shadow .3s}
+header.stuck{border-color:var(--line);box-shadow:0 6px 24px -20px rgba(94,42,56,.5)}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 0}
+.brand{display:flex;align-items:center;gap:11px;text-decoration:none}
+.brand img{width:38px;height:38px;object-fit:contain;animation:bob 7s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+.brand b{font-size:19px;letter-spacing:-.02em;font-weight:800;color:var(--plum)}
+.brand b span{color:var(--crimson)}
+.nav-links{display:flex;gap:24px;font-size:14.5px;color:var(--ink2)}
+.nav-links a{text-decoration:none;position:relative;padding:4px 0;transition:color .25s}
+.nav-links a::after{content:"";position:absolute;left:0;bottom:0;height:1.5px;width:0;background:var(--crimson);transition:width .3s}
+.nav-links a:hover{color:var(--crimson)}
+.nav-links a:hover::after{width:100%}
+@media(max-width:1000px){.nav-links{display:none}}
+
+.btn{display:inline-flex;align-items:center;gap:9px;padding:14px 26px;border-radius:999px;text-decoration:none;
+  font-weight:650;font-size:15.5px;border:1.5px solid var(--crimson);background:var(--crimson);color:#fff;cursor:pointer;
+  box-shadow:0 10px 26px -14px rgba(196,40,63,.9);transition:transform .25s,box-shadow .25s,background .25s}
+.btn:hover{transform:translateY(-2px);background:var(--crimson-d);border-color:var(--crimson-d);box-shadow:0 16px 34px -16px rgba(196,40,63,.95)}
+.btn.ghost{background:#fff;color:var(--plum);border-color:var(--line);box-shadow:none}
+.btn.ghost:hover{border-color:var(--rose);background:var(--pink50);color:var(--crimson)}
+.btn.sm{padding:10px 20px;font-size:14.5px}
+
+/* sections */
+section{padding:96px 0;position:relative}
+.label{display:inline-flex;align-items:center;gap:10px;font-size:12px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--crimson);font-weight:700;margin-bottom:16px}
+.label::before{content:"";width:26px;height:1.5px;background:var(--rose);transform-origin:left;transform:scaleX(0);transition:transform .7s .1s cubic-bezier(.2,.7,.2,1)}
+.in .label::before,.label.in::before{transform:scaleX(1)}
+h1{font-size:clamp(38px,5.6vw,66px);line-height:1.03;letter-spacing:-.035em;margin:0;font-weight:820}
+h2{font-size:clamp(27px,3.6vw,44px);line-height:1.09;letter-spacing:-.028em;margin:0 0 16px;font-weight:800}
+h3{font-size:19.5px;margin:0 0 9px;letter-spacing:-.012em;font-weight:700}
+p.sub{color:var(--muted);max-width:660px;margin:0 0 44px;font-size:17.5px}
+.em{color:var(--crimson)}
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .75s cubic-bezier(.2,.7,.2,1),transform .75s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+
+/* hero */
+.hero{padding:74px 0 64px;position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;width:760px;height:760px;right:-260px;top:-320px;border-radius:50%;
+  background:radial-gradient(circle,rgba(227,135,149,.20),transparent 66%);pointer-events:none}
+.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:56px;align-items:center;position:relative}
+@media(max-width:980px){.hero-grid{grid-template-columns:1fr;gap:38px}}
+.pill{display:inline-flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:var(--plum);
+  background:var(--pink50);border:1px solid var(--pink100);border-radius:999px;padding:8px 16px}
+.pip{width:7px;height:7px;border-radius:50%;background:var(--crimson);animation:pip 2.4s infinite}
+@keyframes pip{0%{box-shadow:0 0 0 0 rgba(196,40,63,.45)}70%{box-shadow:0 0 0 11px rgba(196,40,63,0)}100%{box-shadow:0 0 0 0 rgba(196,40,63,0)}}
+.hero h1{margin-top:24px}
+.hero .lede{color:var(--ink2);font-size:clamp(17px,1.9vw,19.5px);margin:22px 0 0;max-width:540px}
+.hero-cta{display:flex;gap:13px;flex-wrap:wrap;margin-top:34px}
+.hero-note{margin-top:18px;font-size:14px;color:var(--faint)}
+.shot{position:relative;border-radius:22px;overflow:hidden;box-shadow:var(--sh);border:1px solid var(--line2);
+  animation:rise 1.1s cubic-bezier(.2,.7,.2,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(22px) scale(.985)}to{opacity:1;transform:none}}
+.shot img{width:100%;height:clamp(300px,36vw,404px);object-fit:cover;object-position:50% 34%}
+.shot .tag{position:absolute;left:16px;bottom:16px;background:rgba(255,255,255,.93);backdrop-filter:blur(6px);
+  border:1px solid var(--line);border-radius:12px;padding:10px 15px;font-size:13.5px;color:var(--plum);font-weight:600;
+  box-shadow:0 8px 24px -16px rgba(94,42,56,.7)}
+.wave{width:100%;height:52px;margin-top:26px;overflow:visible}
+.wave path{fill:none;stroke-width:2;stroke-linecap:round;stroke-dasharray:1700;stroke-dashoffset:1700;animation:draw 3.2s .3s ease-out forwards}
+.wave path.w2{animation-delay:.6s}
+@keyframes draw{to{stroke-dashoffset:0}}
+
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--bg2)}
+.stats>div{padding:26px 22px;border-right:1px solid var(--line)}
+.stats>div:last-child{border-right:0}
+@media(max-width:940px){.stats{grid-template-columns:repeat(2,1fr)}.stats>div{border-bottom:1px solid var(--line)}}
+.stats .n{font-size:clamp(28px,3.4vw,40px);font-weight:820;letter-spacing:-.035em;color:var(--crimson);line-height:1}
+.stats .t{color:var(--muted);font-size:14px;margin-top:9px}
+
+/* cards */
+.grid{display:grid;gap:16px}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+.g2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:980px){.g3,.g4{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:660px){.g2,.g3,.g4{grid-template-columns:1fr}}
+.card{border:1px solid var(--line);border-radius:var(--r);padding:26px 24px;background:#fff;
+  transition:transform .35s cubic-bezier(.2,.7,.2,1),box-shadow .35s,border-color .35s}
+.card:hover{transform:translateY(-5px);box-shadow:var(--sh);border-color:var(--pink100)}
+.card p{margin:0;color:var(--muted);font-size:15.5px}
+.card .ico{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;margin-bottom:15px;
+  background:var(--pink50);border:1px solid var(--pink100)}
+.card .ico svg{width:21px;height:21px;stroke:var(--crimson);fill:none;stroke-width:1.7}
+.card.soft{background:var(--pink50);border-color:var(--pink100)}
+
+/* method */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:52px;align-items:center}
+@media(max-width:940px){.split{grid-template-columns:1fr;gap:34px}}
+.panel{border:1px solid var(--line);border-radius:20px;background:linear-gradient(180deg,#fff,var(--bg2));padding:14px;box-shadow:var(--sh)}
+.panel svg{width:100%;height:auto;display:block}
+.dashflow{stroke-dasharray:7 9;animation:flow 1.5s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-32}}
+.ring-pulse{animation:rp 3s ease-out infinite}
+@keyframes rp{0%{r:14;opacity:.5}100%{r:32;opacity:0}}
+
+/* steps */
+.steps{list-style:none;padding:0;margin:0;counter-reset:s}
+.steps li{counter-increment:s;padding:19px 0 19px 60px;position:relative;border-bottom:1px solid var(--line2)}
+.steps li:last-child{border-bottom:0}
+.steps li::before{content:counter(s,decimal-leading-zero);position:absolute;left:0;top:18px;width:38px;height:38px;border-radius:11px;
+  display:grid;place-items:center;font-size:12.5px;font-weight:800;color:var(--crimson);background:var(--pink50);border:1px solid var(--pink100)}
+.steps b{display:block;margin-bottom:3px}
+.steps span{color:var(--muted);font-size:15.5px}
+.steps em{font-style:normal;color:var(--faint);font-size:13.5px;margin-left:8px}
+
+/* metrics */
+.ring{border:1px solid var(--line);border-radius:var(--r);padding:24px;background:#fff;text-align:center}
+.ring svg{width:104px;height:104px;transform:rotate(-90deg);margin-inline:auto}
+.ring .track{fill:none;stroke:var(--line2);stroke-width:8}
+.ring .bar{fill:none;stroke-width:8;stroke-linecap:round;stroke-dasharray:295;stroke-dashoffset:295;transition:stroke-dashoffset 1.5s cubic-bezier(.2,.7,.2,1)}
+.ring .cap{font-size:15.5px;font-weight:700;margin-top:12px}
+.ring .d{color:var(--muted);font-size:13.5px;margin-top:5px}
+
+/* cases */
+.case{border:1px solid var(--line);border-radius:var(--r);padding:28px 25px;background:#fff;position:relative;overflow:hidden;display:flex;flex-direction:column;
+  transition:transform .38s cubic-bezier(.2,.7,.2,1),box-shadow .38s,border-color .38s}
+.case:hover{transform:translateY(-6px);box-shadow:var(--sh);border-color:var(--pink100)}
+.case .k{font-size:11.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--rose);font-weight:800;margin-bottom:12px}
+.case p{color:var(--muted);font-size:15.5px;margin:0}
+.case .fig{font-size:26px;font-weight:800;color:var(--crimson);letter-spacing:-.03em;margin:18px 0 0;padding-top:4px}
+.case p{flex:1}
+
+/* team */
+.person{border:1px solid var(--line);border-radius:var(--r);padding:26px 24px;background:#fff}
+.person .av{width:52px;height:52px;border-radius:50%;background:var(--pink50);border:1px solid var(--pink100);
+  display:grid;place-items:center;font-weight:800;color:var(--crimson);font-size:17px;margin-bottom:15px}
+.person .role{color:var(--crimson);font-size:13.5px;font-weight:650;margin-bottom:8px}
+.person p{margin:0;color:var(--muted);font-size:15px}
+
+/* library / accordion */
+.acc{border-top:1px solid var(--line)}
+.q{border-bottom:1px solid var(--line)}
+.q button{all:unset;display:flex;justify-content:space-between;align-items:center;gap:20px;width:100%;box-sizing:border-box;
+  padding:24px 2px;cursor:pointer;font-size:18px;font-weight:700;letter-spacing:-.012em;transition:color .25s}
+.q button:hover{color:var(--crimson)}
+.q button:focus-visible{outline:2px solid var(--rose);outline-offset:4px;border-radius:4px}
+.plus{position:relative;width:19px;height:19px;flex:none}
+.plus::before,.plus::after{content:"";position:absolute;background:var(--crimson);border-radius:2px;transition:transform .35s cubic-bezier(.2,.7,.2,1)}
+.plus::before{left:0;top:8.5px;width:19px;height:2px}
+.plus::after{left:8.5px;top:0;width:2px;height:19px}
+.q.open .plus::after{transform:rotate(90deg) scaleX(0)}
+.a{max-height:0;overflow:hidden;transition:max-height .5s cubic-bezier(.2,.7,.2,1)}
+.a .inner{padding:0 0 26px;max-width:760px}
+.a p{color:var(--ink2);margin:0 0 14px;font-size:16.5px}
+.a p:last-child{margin-bottom:0}
+.a .meta{color:var(--faint);font-size:13.5px;margin-top:16px}
+.tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.tag-s{font-size:12.5px;color:var(--plum);background:var(--pink50);border:1px solid var(--pink100);border-radius:999px;padding:5px 12px}
+
+/* audience */
+.aud{border:1px solid var(--line);border-radius:var(--r);padding:24px;background:#fff;transition:background .3s,border-color .3s}
+.aud:hover{background:var(--pink50);border-color:var(--pink100)}
+.aud b{display:block;margin-bottom:7px}
+.aud p{margin:0;color:var(--muted);font-size:15px}
+
+/* cta */
+.cta{border:1px solid var(--pink100);border-radius:24px;padding:clamp(34px,5vw,62px);text-align:center;
+  background:radial-gradient(680px 240px at 50% -10%,var(--pink50),#fff)}
+.cta p{color:var(--muted);max-width:560px;margin:0 auto 30px}
+.note{margin-top:24px;font-size:13.5px;color:var(--faint);max-width:640px;margin-inline:auto}
+footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-size:14px}
+.foot{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center}
+.marq{border-block:1px solid var(--line);background:var(--bg2);padding:16px 0;overflow:hidden;white-space:nowrap}
+.mtrack{display:inline-flex;gap:40px;animation:scroll 38s linear infinite;font-size:14px;color:var(--muted)}
+.mtrack i{font-style:normal;display:inline-flex;align-items:center;gap:11px}
+.mtrack i::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--rose)}
+@keyframes scroll{to{transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}.wave path{stroke-dashoffset:0}}
+</style>
+</head>
+<body>
+<header id="hdr">
+  <div class="wrap nav">
+    <a class="brand" href="#top"><img src="assets/mark.png" alt="НейроПРО"><b>Нейро<span>ПРО</span></b></a>
+    <nav class="nav-links">
+      <a href="#problem">Кому</a>
+      <a href="#method">Метод</a>
+      <a href="#services">Направления</a>
+      <a href="#cases">Кейсы</a>
+      <a href="#team">Команда</a>
+      <a href="#library">Библиотека</a>
+      <a href="#faq">Вопросы</a>
+    </nav>
+    <a class="btn sm" href="#cta">Записаться</a>
+  </div>
+</header>
+
+<main id="top">
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="pill"><i class="pip"></i> 8 лет исследований · более 1300 диагностик</span>
+      <h1>Тело не лжёт.<br>Спросите <span class="em">свой мозг</span>, а не своё мнение о себе</h1>
+      <p class="lede">НейроПРО — лаборатория повышения личной эффективности. За 40 минут на сертифицированном оборудовании биологической обратной связи мы снимаем объективную картину работы вашей нервной системы и объясняем, что с ней делать.</p>
+      <div class="hero-cta">
+        <a class="btn" href="#cta">Записаться на диагностику
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+        <a class="btn ghost" href="#method">Как это работает</a>
+      </div>
+      <p class="hero-note">Диагностика 40 минут · разбор с аналитиком · отчёт с рекомендациями за 3–5 дней</p>
+      <svg class="wave" viewBox="0 0 640 52" preserveAspectRatio="none" aria-hidden="true">
+        <path stroke="#c4283f" d="M0 26 h56 l10-15 8 30 9-34 10 26 11-7 h60 l9-12 9 22 9-26 10 20 11-5 h70 l10-16 8 30 9-33 10 25 12-6 h64 l9-11 9 20 9-24 10 19 11-4 h120"/>
+        <path class="w2" stroke="#e38795" d="M0 44 q40 -14 80 0 t80 0 80 -10 80 10 80 0 80 -12 80 12 80 0"/>
+      </svg>
+    </div>
+    <div class="shot">
+      <img src="assets/hero-sm.jpg" alt="Специалист НейроПРО устанавливает электроды для снятия ЭЭГ во время нейродиагностики">
+      <span class="tag">Съём ЭЭГ и параметров вегетативной нервной системы</span>
+    </div>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="stats reveal">
+      <div><div class="n" data-count="1300" data-suffix="+">0</div><div class="t">проведённых нейродиагностик</div></div>
+      <div><div class="n" data-count="8" data-suffix=" лет">0</div><div class="t">исследований мозга и успешности</div></div>
+      <div><div class="n" data-count="40" data-suffix=" мин">0</div><div class="t">длится само исследование</div></div>
+      <div><div class="n" data-count="3" data-suffix="–5 дн">0</div><div class="t">до отчёта с рекомендациями</div></div>
+      <div><div class="n" data-count="50" data-suffix="%">0</div><div class="t">клиентов возвращаются повторно</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="problem">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="label">Кому это нужно</div>
+      <h2>Это не характер и не лень.<br>У этих состояний есть физиология</h2>
+      <p class="sub">Всё, что перечислено ниже, обычно объясняют мотивацией и силой воли. На приборе видно другое: запас прочности нервной системы, способность к концентрации и к восстановлению. Это измеряется — и это тренируется.</p>
+    </div>
+    <div class="grid g3 reveal">
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 5-8 4 5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>Застой в бизнесе и работе</h3><p>Усилий столько же, результат меньше. Часто дело не в стратегии, а в исчерпанном ресурсе.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 3 6.2L4 20l.9-3A8 8 0 0 1 4 12Z" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>Конфликты с близкими и коллегами</h3><p>Раздражение там, где раньше его не было. Низкая стрессоустойчивость даёт срыв на ровном месте.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2" stroke-linecap="round"/></svg></div><h3>Не знаете, куда двигаться</h3><p>Направлений много, ни одно не ощущается своим. Нет точки опоры для решения.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2" stroke-linecap="round"/></svg></div><h3>Не получается расслабиться или сконцентрироваться</h3><p>Два противоположных навыка, за которые отвечают разные ритмы мозга. Оба тренируются по обратной связи.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M17 5a7 7 0 1 1-8.5 10.9A8 8 0 0 0 17 5Z" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>Быстро устаёте, постоянно хотите спать</h3><p>Сон не восстанавливает, к обеду ресурс на нуле. У усталости есть измеримая физиологическая основа.</p></div>
+      <div class="card soft"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16" stroke-linecap="round"/></svg></div><h3>Просто хотите увидеть себя объективно</h3><p>Сильные и слабые стороны, зоны максимального и минимального КПД мозга — без интерпретаций и советов «по ощущениям».</p></div>
+    </div>
+  </div>
+</section>
+
+<div class="marq" aria-hidden="true">
+  <div class="mtrack">
+    <i>биологическая обратная связь</i><i>ЭЭГ · 2 отведения</i><i>функциональная асимметрия</i><i>альфа · бета · тета</i><i>стресс-тестирование</i><i>нейротренинг</i><i>саморегуляция</i><i>вегетативный баланс</i>
+    <i>биологическая обратная связь</i><i>ЭЭГ · 2 отведения</i><i>функциональная асимметрия</i><i>альфа · бета · тета</i><i>стресс-тестирование</i><i>нейротренинг</i><i>саморегуляция</i><i>вегетативный баланс</i>
+  </div>
+</div>
+<section id="method">
+  <div class="wrap split">
+    <div class="reveal">
+      <div class="label">Метод</div>
+      <h2>Мы не берём цифры<br>с потолка. Это всё ваше</h2>
+      <p class="sub">Всё, на что реагирует ваш мозг во время исследования, напрямую передаётся на сертифицированную аппаратуру. Картина складывается из ваших физиологических откликов, а не из ваших ответов о себе. Поэтому результат нельзя «подготовить» или приукрасить.</p>
+      <ol class="steps">
+        <li><b>Заявка и консультация</b><span>Разбираем задачу, с которой вы приходите, и записываем на исследование.</span></li>
+        <li><b>Нейродиагностика<em>40 минут</em></b><span>Надевается шапочка ЭЭГ, вы смотрите видеоряд. Прибор снимает реакции на раздражители, кожно-гальваническую реакцию, дыхание и другие параметры.</span></li>
+        <li><b>Разбор с аналитиком<em>до 40 минут</em></b><span>Врач объясняет медицинские показатели, аналитик — что они означают для вашей работы, отношений и планов.</span></li>
+        <li><b>Отчёт с рекомендациями<em>3–5 дней</em></b><span>Письменный документ: сильные и слабые стороны, зоны максимального КПД, рекомендации по направлению движения.</span></li>
+        <li><b>Курс нейротренингов</b><span>Индивидуальная программа тренировки саморегуляции по обратной связи — под вашу задачу, а не по общему шаблону.</span></li>
+      </ol>
+    </div>
+    <div class="panel reveal">
+      <svg viewBox="0 0 460 400" fill="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="bg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5e2a38"/><stop offset="1" stop-color="#c4283f"/></linearGradient>
+          <radialGradient id="glow"><stop offset="0" stop-color="#e38795" stop-opacity=".28"/><stop offset="1" stop-color="#e38795" stop-opacity="0"/></radialGradient>
+        </defs>
+        <circle cx="230" cy="126" r="96" fill="url(#glow)"/>
+        <path d="M230 52c34 0 62 10 80 28 20 20 26 48 18 72-9 26-36 44-70 47-10 1-20-2-28-8-8 6-18 9-28 8-34-3-61-21-70-47-8-24-2-52 18-72 18-18 46-28 80-28Z" stroke="url(#bg1)" stroke-width="2.2"/>
+        <path d="M230 60c-6 12-6 22 0 32s6 20 0 30 -6 20 0 30 6 20 0 39" stroke="url(#bg1)" stroke-width="1.7" opacity=".85"/>
+        <path d="M198 68c-14 6-18 18-10 27M186 106c-16 4-22 16-14 26M198 146c-14 6-16 18-6 26M212 178c-10 6-11 14-4 20" stroke="#c4283f" stroke-width="1.3" opacity=".45" stroke-linecap="round"/>
+        <path d="M262 68c14 6 18 18 10 27M274 106c16 4 22 16 14 26M262 146c14 6 16 18 6 26M248 178c10 6 11 14 4 20" stroke="#5e2a38" stroke-width="1.3" opacity=".45" stroke-linecap="round"/>
+        <circle cx="182" cy="110" r="4.5" fill="#c4283f"/><circle class="ring-pulse" cx="182" cy="110" r="14" fill="none" stroke="#c4283f" stroke-width="1"/>
+        <circle cx="280" cy="110" r="4.5" fill="#5e2a38"/><circle class="ring-pulse" cx="280" cy="110" r="14" fill="none" stroke="#5e2a38" stroke-width="1" style="animation-delay:1s"/>
+        <circle cx="230" cy="170" r="4" fill="#e38795"/><circle class="ring-pulse" cx="230" cy="170" r="14" fill="none" stroke="#e38795" stroke-width="1" style="animation-delay:2s"/>
+        <path class="dashflow" d="M182 110C152 156 130 208 136 262" stroke="#c4283f" stroke-width="1.6" opacity=".8"/>
+        <path class="dashflow" d="M280 110C310 156 332 208 326 262" stroke="#5e2a38" stroke-width="1.6" opacity=".8" style="animation-delay:.4s"/>
+        <path class="dashflow" d="M230 170C228 202 228 232 230 262" stroke="#e38795" stroke-width="1.6" opacity=".8" style="animation-delay:.8s"/>
+        <rect x="88" y="264" width="284" height="90" rx="16" fill="#fdf4f5" stroke="#f8e6e9"/>
+        <text x="230" y="292" text-anchor="middle" fill="#5e2a38" font-size="13.5" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Аппаратура БОС «Реакор»</text>
+        <path d="M112 322h30l8-16 10 30 9-24 8 16 10-8 8 8h153" stroke="#c4283f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="230" y="380" text-anchor="middle" fill="#9c8d92" font-size="11.5" font-family="Inter,Segoe UI,sans-serif" letter-spacing="1.6">ВАШИ СОБСТВЕННЫЕ ПОКАЗАТЕЛИ</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<section id="metrics" style="background:var(--bg2);border-block:1px solid var(--line)">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="label">Что измеряем</div>
+      <h2>Четыре группы параметров<br>за одно исследование</h2>
+      <p class="sub">Плюс набор дополнительных репрезентативных показателей — состав протокола зависит от задачи, с которой вы приходите. Работаем на сертифицированном медицинском оборудовании и собственном алгоритме обработки данных.</p>
+    </div>
+    <div class="grid g4 reveal">
+      <div class="ring"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="47"/><circle class="bar" cx="60" cy="60" r="47" stroke="#c4283f" data-pct="88"/></svg><div class="cap">Биоэлектрическая активность</div><div class="d">ритмы мозга и их соотношение</div></div>
+      <div class="ring"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="47"/><circle class="bar" cx="60" cy="60" r="47" stroke="#5e2a38" data-pct="74"/></svg><div class="cap">Функциональная асимметрия</div><div class="d">как распределена нагрузка между полушариями</div></div>
+      <div class="ring"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="47"/><circle class="bar" cx="60" cy="60" r="47" stroke="#e38795" data-pct="66"/></svg><div class="cap">Сила и адаптированность ЦНС</div><div class="d">запас прочности нервной системы</div></div>
+      <div class="ring"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="47"/><circle class="bar" cx="60" cy="60" r="47" stroke="#a31e33" data-pct="81"/></svg><div class="cap">Реактивность вегетатики</div><div class="d">как тело отвечает на нагрузку и стресс</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="services">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="label">Направления</div>
+      <h2>Измерить · понять · натренировать</h2>
+      <p class="sub">Три продукта, которые работают как один маршрут. Можно остановиться на первом шаге, но смысл появляется, когда за измерением следует тренировка.</p>
+    </div>
+    <div class="grid g3 reveal">
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-6 3 12 3-9 2 3h4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <h3>Нейродиагностика</h3><p>Снятие объективных показателей работы нервной системы за 40 минут и разбор результата с врачом и аналитиком. Точка входа в продукт.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16 16l4 4" stroke-linecap="round"/></svg></div>
+        <h3>Нейроисследование</h3><p>Углублённый протокол под задачу: расстановка людей по ролям, оценка запаса прочности, поиск зон максимального и минимального КПД.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 20V8M6 20v-6M18 20V4" stroke-linecap="round"/></svg></div>
+        <h3>Нейротренинг</h3><p>Тренировка саморегуляции по обратной связи: вы видите собственные показатели на экране в реальном времени и учитесь ими управлять.</p></div>
+    </div>
+    <div class="reveal" style="margin-top:26px;border:1px solid var(--line);border-radius:var(--r);padding:28px 26px;background:var(--pink50)">
+      <h3 style="margin-bottom:16px">Виды нейротренинга</h3>
+      <div class="grid g2" style="gap:14px 34px">
+        <div>
+          <p style="margin:0 0 10px"><b>Альфа-тренинг</b> — глубокая психологическая релаксация и активация творческих способностей.</p>
+          <p style="margin:0 0 10px"><b>Альфа-тета тренинг</b> — навыки психической регуляции, релаксация, снижение выраженности аддикций.</p>
+          <p style="margin:0"><b>Бета и бета-тета тренинг</b> — коррекция дефицита внимания, снижение гиперактивности, восстановление когнитивных функций.</p>
+        </div>
+        <div>
+          <p style="margin:0 0 10px"><b>ЭЭГ-ЭМГ тренинг</b> — максимальная концентрация внимания на фоне глубокой мышечной релаксации.</p>
+          <p style="margin:0 0 10px"><b>По физиологии</b> — по частоте сердечных сокращений, температуре, дыханию, параметрам кровообращения, ЭМГ.</p>
+          <p style="margin:0"><b>БОС по гемодинамике и стресс-тестирование</b> — мозговой кровоток, центральная гемодинамика, реакция на нагрузку.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="audience" style="background:var(--bg2);border-block:1px solid var(--line)">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="label">Для кого</div>
+      <h2>Один прибор — четыре разных вопроса</h2>
+    </div>
+    <div class="grid g4 reveal">
+      <div class="aud"><b>Собственникам и руководителям</b><p>Где ваш реальный запас прочности, какие задачи вас не выжигают, а какие — только выглядят важными.</p></div>
+      <div class="aud"><b>HR и командам</b><p>Расстановка ключевых фигур по объективным данным, а не по субъективному впечатлению. Роли в команде, риски выгорания.</p></div>
+      <div class="aud"><b>Спорту</b><p>Индивидуальные программы под роль в игре, тренировка концентрации и восстановления. Проверено в командном спорте.</p></div>
+      <div class="aud"><b>Для себя</b><p>Самопознание без эзотерики: сильные и слабые стороны, стрессоустойчивость, отношения, направление развития.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="cases">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="label">Кейсы</div>
+      <h2>Там, где результат<br>виден на табло</h2>
+      <p class="sub">Спорт высших достижений — самая честная проверка метода: там некуда деться от объективного результата.</p>
+    </div>
+    <div class="grid g3 reveal">
+      <div class="case">
+        <div class="k">Командный спорт</div>
+        <h3>ХК «Ак Барс»</h3>
+        <p>Диагностика 10 ведущих и 10 перспективных хоккеистов и серия тренингов на индивидуальную и командную эффективность. Программа собиралась под роль в игре — вратарь, нападающий, защитник — и шла вместе с обычными физическими нагрузками. Результат подтверждён благодарственным письмом.</p>
+        <div class="fig">600 000 ₽</div>
+      </div>
+      <div class="case">
+        <div class="k">Настольный теннис</div>
+        <h3>Максим Шмырев</h3>
+        <p>Трёхкратный чемпион мира по пинг-понгу и 19-кратный чемпион России тренировался в лаборатории на аппарате под наблюдением врача-невролога.</p>
+        <div class="fig">3× чемпион мира</div>
+      </div>
+      <div class="case">
+        <div class="k">Спортивные федерации</div>
+        <h3>РСБИ и пауэрлифтинг</h3>
+        <p>Среди клиентов — Сергей Безруков, исполнительный директор Ульяновского филиала «Российского Союза Боевых Искусств», и Павел Чувилин, председатель спортивной федерации «Пауэрлифтинг».</p>
+        <div class="fig">2 федерации</div>
+      </div>
+      <div class="case">
+        <div class="k">Бизнес-команда</div>
+        <h3>Диагностика команды «Бизнес Молодости»</h3>
+        <p>Самый необычный и самый сложный проект: измеряли эффективность целой команды, а не отдельного человека. Отсюда же выросла аудитория предпринимателей.</p>
+      </div>
+      <div class="case">
+        <div class="k">Большой теннис · медиа</div>
+        <h3>Александр Куприн</h3>
+        <p>Профессиональный тренер по теннису прошёл исследование в рамках научного эксперимента лаборатории и снял видео-отчёт. Съёмочные группы телеканалов приезжали в лабораторию не раз.</p>
+      </div>
+      <div class="case">
+        <div class="k">Госсектор</div>
+        <h3>Чиновники разных уровней</h3>
+        <p>Тренинги проходили представители государственных структур. Половина клиентов возвращается повторно, каждый пятый приходит по рекомендации.</p>
+        <div class="fig">50% · 20%</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="team" style="background:var(--bg2);border-block:1px solid var(--line)">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="label">Команда</div>
+      <h2>Диагностику ведёт врач,<br>интерпретацию — научный сотрудник</h2>
+      <p class="sub">Это принципиальная разница с рынком консультантов: за прибором стоит медицинское образование, за выводом — научная работа.</p>
+    </div>
+    <div class="grid g3 reveal">
+      <div class="person"><div class="av">ГД</div><div class="role">Врач-невролог</div><h3>Денис Грищук</h3><p>Кандидат медицинских наук, старший преподаватель кафедры медицинской психологии, психоневрологии и психиатрии. Проводит нейродиагностику и разъясняет медицинские показатели.</p></div>
+      <div class="person"><div class="av">ЩВ</div><div class="role">Аналитик, учредитель</div><h3>Владислав Щепочкин</h3><p>Кандидат технических наук, доцент. Старший научный сотрудник НИТИ им. С. П. Капицы УлГУ, соучредитель малого инновационного предприятия — участника «Сколково». Интерпретирует результат.</p></div>
+      <div class="person"><div class="av">ГР</div><div class="role">Руководитель, учредитель</div><h3>Радик Гафуров</h3><p>Предприниматель с 2001 года, основатель и руководитель ГК ГЛОБАЛ, президент АПМ РФ в 2011–2014. Лучший предприниматель Ульяновской области 2011 года.</p></div>
+    </div>
+  </div>
+</section>
+<section id="library">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="label">Библиотека</div>
+      <h2>Что стоит понять до того,<br>как вы придёте</h2>
+      <p class="sub">Шесть текстов, объясняющих метод и то, как работает мозг. Без упрощений до «позитивного мышления» и без наукообразия ради наукообразия.</p>
+    </div>
+    <div class="acc reveal">
+
+      <div class="q"><button>Почему опросник не заменяет прибор<span class="plus"></span></button><div class="a"><div class="inner">
+        <p>Любая психологическая анкета измеряет две вещи одновременно: то, что человек о себе думает, и то, что он готов о себе сообщить. Между этими двумя величинами и реальностью может лежать пропасть — особенно у руководителя, который годами тренировался выглядеть собранным.</p>
+        <p>Биологическая обратная связь снимает вопрос иначе. Мы не спрашиваем, устали ли вы, — мы смотрим, как ваша нервная система отвечает на нагрузку. Всё, на что реагирует мозг во время исследования, напрямую передаётся на аппаратуру: реакция на раздражители, кожно-гальваническая реакция, дыхание, ритмы. Из этого массива и складывается картина.</p>
+        <p>Отсюда главный тезис метода: мы никогда не берём цифры с потолка. Это всё ваше. Результат нельзя подготовить заранее, «правильно» ответить или приукрасить — тело отвечает быстрее, чем успевает включиться самопрезентация.</p>
+        <p>Практическое следствие простое. Там, где консультант строит гипотезу и проверяет её разговором, мы начинаем с измерения — и разговор ведём уже поверх данных.</p>
+        <div class="tags"><span class="tag-s">БОС</span><span class="tag-s">методология</span><span class="tag-s">объективные данные</span></div>
+      </div></div></div>
+
+      <div class="q"><button>Что показывает ЭЭГ: ритмы и функциональная асимметрия<span class="plus"></span></button><div class="a"><div class="inner">
+        <p>Мозг постоянно генерирует электрическую активность, и она разложима на ритмы. Альфа связан с расслабленным бодрствованием и творческими состояниями, бета — с концентрацией и активной работой, тета — с пограничными состояниями между сном и явью, глубокой релаксацией, доступом к образному мышлению. Соотношение этих ритмов у каждого своё и меняется под нагрузкой.</p>
+        <p>Второй пласт — функциональная асимметрия: как распределяется работа между полушариями. Это не про бытовое «левополушарный человек», а про то, какой контур включается у вас первым, когда задача становится трудной, и насколько дорого вам обходится переключение.</p>
+        <p>Третий — сила, адаптированность и реактивность центральной и вегетативной нервных систем. Это и есть запас прочности: как быстро система выходит на нагрузку и, что важнее, как быстро возвращается обратно.</p>
+        <p>По отдельности каждый показатель мало что значит. Смысл появляется в связке — и именно связку разбирает аналитик, а не программа.</p>
+        <div class="tags"><span class="tag-s">ЭЭГ</span><span class="tag-s">альфа · бета · тета</span><span class="tag-s">асимметрия</span></div>
+      </div></div></div>
+
+      <div class="q"><button>Стрессоустойчивость: что именно измеряется<span class="plus"></span></button><div class="a"><div class="inner">
+        <p>В разговорном языке стрессоустойчивость — это способность «держаться». В физиологии это две разные способности, и человек может быть силён в одной и слаб в другой: мобилизоваться под нагрузкой и восстанавливаться после неё.</p>
+        <p>Классическая ошибка сильного руководителя — прокачанная мобилизация при провальном восстановлении. Внешне это выглядит как выносливость, внутри накапливается как истощение. Одна и та же ситуация в разные периоды вызывает совершенно разные реакции: один раз бурю эмоций, другой раз спокойствие. Разница — не в ситуации, а в наличии сил.</p>
+        <p>Стресс-тестирование в протоколе как раз и разводит эти две величины. Мы даём контролируемую нагрузку и смотрим не только пик реакции, но и кривую возврата.</p>
+        <p>Дальше это превращается в конкретику: какие задачи для вас дорогие, какие дешёвые, где нужен режим восстановления, а где — тренировка концентрации.</p>
+        <div class="tags"><span class="tag-s">стресс-тест</span><span class="tag-s">выгорание</span><span class="tag-s">ресурс</span></div>
+      </div></div></div>
+
+      <div class="q"><button>Умственная усталость реальна: мозг и энергия<span class="plus"></span></button><div class="a"><div class="inner">
+        <p>Вес мозга взрослого человека — около 1,4 кг, примерно 2% массы тела. При этом на него приходится около 20% всей энергии, которую тело тратит за спокойный день. Работающему мозгу нужно порядка 12 Вт — примерно пятая часть мощности стандартной 60-ваттной лампочки.</p>
+        <p>Любопытно другое: короткие всплески умственного усилия почти не меняют этот расход. Базовый уровень сам по себе дорогой — даже в фазе медленного сна потребление глюкозы остаётся высоким, потому что мозг обязан постоянно поддерживать концентрации заряженных частиц на мембранах миллиардов нейронов.</p>
+        <p>Значит, чувство «я выжат головой» объясняется не сожжёнными калориями. Оно ближе к стрессовой реакции: исследования показывают, что интеллектуальная нагрузка заметно поднимает уровень гормонов стресса, давление и субъективную тревожность — при почти неизменном метаболизме мозга.</p>
+        <p>Отсюда вывод, важный для диагностики: усталость от работы головой — это вопрос состояния нервной системы, а не бюджета калорий. И она поддаётся измерению.</p>
+        <div class="tags"><span class="tag-s">энергия мозга</span><span class="tag-s">усталость</span><span class="tag-s">кортизол</span></div>
+      </div></div></div>
+
+      <div class="q"><button>Нейротренинг: что именно тренируется<span class="plus"></span></button><div class="a"><div class="inner">
+        <p>Принцип нейротренинга — замкнуть петлю. Прибор снимает ваш показатель и тут же возвращает его вам в виде сигнала на экране. Вы не знаете «как» им управлять, но мозг быстро находит способ, потому что видит результат немедленно. Так тренируется навык, который иначе описать невозможно.</p>
+        <p>Направление тренинга выбирается по цели. <b>Альфа-тренинг</b> — глубокая релаксация и активация творческих способностей. <b>Альфа-тета</b> — навыки психической регуляции и снижение выраженности аддикций. <b>Бета и бета-тета</b> — коррекция дефицита внимания, снижение гиперактивности, восстановление когнитивных функций. <b>ЭЭГ-ЭМГ</b> — состояние, в котором максимальная концентрация сочетается с глубокой мышечной релаксацией.</p>
+        <p>Есть и тренинги по другим контурам: частота сердечных сокращений, температура, дыхание, параметры кровообращения, мозговой кровоток, центральная гемодинамика.</p>
+        <p>Методика позволяет буквально видеть и слышать тончайшие изменения состояния организма при обучении навыкам психосоматической регуляции — для восстановления, укрепления здоровья и расширения психофизиологических возможностей.</p>
+        <div class="tags"><span class="tag-s">нейрофидбэк</span><span class="tag-s">саморегуляция</span><span class="tag-s">протоколы</span></div>
+      </div></div></div>
+
+      <div class="q"><button>Метод в спорте: почему там он проверяется лучше всего<span class="plus"></span></button><div class="a"><div class="inner">
+        <p>В личной эффективности результат всегда можно объяснить обстоятельствами. В спорте — нельзя: есть табло. Поэтому спортивные проекты для нас — не только выручка, но и способ проверить метод.</p>
+        <p>В работе с хоккейным клубом программа собиралась не «для команды», а под роль в игре: вратарю, нападающему и защитнику нужны разные состояния. Вратарю — устойчивая концентрация в длинном ожидании, нападающему — быстрая мобилизация, защитнику — способность держать внимание широким. Курс аппаратных тренировок шёл параллельно с обычными физическими нагрузками, а не вместо них.</p>
+        <p>Тот же принцип работает в индивидуальных видах спорта: настольный теннис требует скорости реакции и устойчивости к сбою после ошибки, большой теннис — восстановления между розыгрышами.</p>
+        <p>Перенос на бизнес прямой. Роль в команде — это тоже требование к состоянию, а не только к компетенции. Человека можно поставить на позицию, к которой у него нет физиологического запаса, и получить выгорание вместо результата.</p>
+        <div class="tags"><span class="tag-s">спорт</span><span class="tag-s">командные роли</span><span class="tag-s">перенос в бизнес</span></div>
+      </div></div></div>
+
+    </div>
+  </div>
+</section>
+
+<section id="faq" style="background:var(--bg2);border-block:1px solid var(--line)">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="label">Вопросы</div>
+      <h2>Что спрашивают чаще всего</h2>
+    </div>
+    <div class="acc reveal">
+      <div class="q"><button>Что я получу в итоге?<span class="plus"></span></button><div class="a"><div class="inner"><p>Разбор результата вместе с врачом и аналитиком сразу после исследования и письменный отчёт с рекомендациями через 3–5 дней: сильные и слабые стороны, зоны максимального и минимального КПД, стрессоустойчивость, рекомендации по направлению движения и, если это уместно под вашу задачу, программа нейротренингов.</p></div></div></div>
+      <div class="q"><button>Это не опасно для здоровья?<span class="plus"></span></button><div class="a"><div class="inner"><p>Процедура неинвазивная и пассивная: на голову надевается шапочка электроэнцефалографии, вы смотрите видеоряд. Прибор только считывает сигналы, ничего не подаёт в организм. Исследование проводит врач-невролог.</p></div></div></div>
+      <div class="q"><button>Чем это отличается от психолога или курса по саморазвитию?<span class="plus"></span></button><div class="a"><div class="inner"><p>Точкой отсчёта. Психолог и коуч работают с тем, что вы рассказываете о себе; мы начинаем с измерения физиологии и только потом переходим к разговору. Это не заменяет психотерапию — это даёт ей объективную базу. И это единственный формат, где вы можете тренировать состояние по обратной связи, а не только обсуждать его.</p></div></div></div>
+      <div class="q"><button>А если исследование покажет мои слабые места?<span class="plus"></span></button><div class="a"><div class="inner"><p>Оно почти наверняка их покажет — в этом и смысл. Слабое место, о котором вы знаете, перестаёт управлять вами незаметно: его можно обойти расстановкой задач, компенсировать людьми рядом или натренировать. Отчёт устроен так, чтобы каждая слабая зона сопровождалась рекомендацией, а не диагнозом.</p></div></div></div>
+      <div class="q"><button>Сколько это длится?<span class="plus"></span></button><div class="a"><div class="inner"><p>Сама диагностика — 40 минут. Беседа с аналитиком — до 40 минут. Отчёт готовится 3–5 дней. Нейротренинги идут курсом, длительность зависит от протокола и задачи.</p></div></div></div>
+      <div class="q"><button>Сколько стоит и есть ли рассрочка?<span class="plus"></span></button><div class="a"><div class="inner"><p>Стоимость зависит от протокола: разовая диагностика, углублённое исследование и курс нейротренингов считаются отдельно. Возможна рассрочка на исследования и скидка при покупке курса тренингов. Точную цену на текущую дату уточняйте при записи.</p></div></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="cta">
+  <div class="wrap">
+    <div class="cta reveal">
+      <h2>Посмотрите на себя<br>как на данные</h2>
+      <p>Начните с диагностики: 40 минут исследования, разбор с врачом и аналитиком, отчёт с рекомендациями через 3–5 дней.</p>
+      <a class="btn" href="#cta">Записаться на диагностику
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+      <p class="note">Телефон, адрес и форма записи намеренно не заполнены: прежние контакты неактуальны. Подставьте актуальные данные и ссылку на запись перед публикацией — места для них отмечены в коде.</p>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>НейроПРО · Лаборатория повышения личной эффективности</span>
+    <span>Москва · Ульяновск · Казань</span>
+  </div>
+</footer>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "MedicalBusiness",
+      "@id": "#org",
+      "name": "НейроПРО",
+      "alternateName": "НейроПРО. Лаборатория мозга",
+      "description": "Лаборатория повышения личной эффективности: аппаратная нейродиагностика по методу биологической обратной связи, разбор с врачом и аналитиком, курс нейротренингов.",
+      "logo": "assets/mark.png",
+      "image": "assets/hero.jpg",
+      "areaServed": ["Москва", "Ульяновск", "Казань"],
+      "medicalSpecialty": "Neurologic",
+      "knowsAbout": ["биологическая обратная связь", "электроэнцефалография", "нейрофидбэк", "стрессоустойчивость", "функциональная асимметрия"]
+    },
+    {
+      "@type": "Service",
+      "name": "Нейродиагностика",
+      "provider": {"@id": "#org"},
+      "serviceType": "Аппаратное исследование мозга по методу биологической обратной связи",
+      "description": "Исследование 40 минут: биоэлектрическая активность, функциональная асимметрия, сила и адаптированность ЦНС, реактивность вегетативной нервной системы. Разбор с аналитиком и отчёт с рекомендациями за 3–5 дней."
+    },
+    {
+      "@type": "Service",
+      "name": "Нейротренинг",
+      "provider": {"@id": "#org"},
+      "serviceType": "Тренировка саморегуляции по биологической обратной связи",
+      "description": "Альфа, альфа-тета, бета и бета-тета, ЭЭГ-ЭМГ тренинги, БОС по параметрам дыхания, кровообращения и гемодинамики, стресс-тестирование."
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {"@type":"Question","name":"Что я получу в итоге?","acceptedAnswer":{"@type":"Answer","text":"Разбор результата с врачом и аналитиком сразу после исследования и письменный отчёт с рекомендациями через 3–5 дней: сильные и слабые стороны, зоны максимального и минимального КПД, стрессоустойчивость и рекомендации по направлению движения."}},
+        {"@type":"Question","name":"Это не опасно для здоровья?","acceptedAnswer":{"@type":"Answer","text":"Процедура неинвазивная и пассивная: на голову надевается шапочка электроэнцефалографии, прибор только считывает сигналы. Исследование проводит врач-невролог."}},
+        {"@type":"Question","name":"Чем это отличается от психолога или курса по саморазвитию?","acceptedAnswer":{"@type":"Answer","text":"Точкой отсчёта: мы начинаем с измерения физиологии и только потом переходим к разговору, а состояние можно тренировать по обратной связи, а не только обсуждать."}},
+        {"@type":"Question","name":"Сколько это длится?","acceptedAnswer":{"@type":"Answer","text":"Диагностика 40 минут, беседа с аналитиком до 40 минут, отчёт готовится 3–5 дней."}}
+      ]
+    }
+  ]
+}
+</script>
+<script>
+(function(){
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var hdr = document.getElementById('hdr');
+  addEventListener('scroll', function(){ hdr.classList.toggle('stuck', scrollY > 8); }, {passive:true});
+
+  var io = new IntersectionObserver(function(es){
+    es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, {threshold:.12, rootMargin:'0px 0px -50px'});
+  document.querySelectorAll('.reveal, .label').forEach(function(el){ io.observe(el); });
+
+  function countUp(el){
+    var end = +el.dataset.count, suf = el.dataset.suffix || '', t0 = null, dur = 1500;
+    if(reduce){ el.textContent = end + suf; return; }
+    (function step(t){
+      if(!t0) t0 = t;
+      var p = Math.min((t - t0)/dur, 1), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(end * e).toLocaleString('ru-RU') + suf;
+      if(p < 1) requestAnimationFrame(step);
+    })(performance.now());
+  }
+  var io2 = new IntersectionObserver(function(es){
+    es.forEach(function(e){ if(e.isIntersecting){ countUp(e.target); io2.unobserve(e.target); } });
+  }, {threshold:.5});
+  document.querySelectorAll('[data-count]').forEach(function(el){ io2.observe(el); });
+
+  var io3 = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(!e.isIntersecting) return;
+      var c = e.target, len = 2 * Math.PI * 47;
+      c.style.strokeDasharray = len;
+      c.style.strokeDashoffset = len - len * (+c.dataset.pct) / 100;
+      io3.unobserve(c);
+    });
+  }, {threshold:.45});
+  document.querySelectorAll('.ring .bar').forEach(function(c){ io3.observe(c); });
+
+  // accordions: independent per block
+  document.querySelectorAll('.acc').forEach(function(acc){
+    acc.querySelectorAll('.q button').forEach(function(b){
+      b.addEventListener('click', function(){
+        var q = b.parentElement, a = q.querySelector('.a'), open = q.classList.contains('open');
+        acc.querySelectorAll('.q.open').forEach(function(o){
+          o.classList.remove('open'); o.querySelector('.a').style.maxHeight = null;
+        });
+        if(!open){ q.classList.add('open'); a.style.maxHeight = a.scrollHeight + 'px'; }
+      });
+    });
+  });
+  addEventListener('resize', function(){
+    document.querySelectorAll('.q.open .a').forEach(function(a){ a.style.maxHeight = a.scrollHeight + 'px'; });
+  });
+})();
+</script>
+</body>
+</html>
