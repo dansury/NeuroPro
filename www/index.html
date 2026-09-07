@@ -7,7 +7,7 @@
 <meta name="description" content="НейроПРО: аппаратная нейродиагностика на сертифицированном оборудовании БОС. 40 минут исследования, разбор с аналитиком, отчёт с рекомендациями за 3–5 дней и курс нейротренингов. Более 1300 диагностик.">
 <link rel="icon" href="assets/favicon.png" type="image/png">
 <meta property="og:title" content="НейроПРО — лаборатория повышения личной эффективности">
-<meta property="og:description" content="Объективная картина работы вашей нервной системы за 40 минут: биоэлектрическая активность, функциональная асимметрия, стрессоустойчивость, ресурс.">
+<meta property="og:description" content="Объективная картина работы вашей нервной системы за 40 минут: биоэлектрическая активность, смысло-эмоциональная значимость тем, стрессоустойчивость, ресурс.">
 <meta property="og:image" content="assets/hero.jpg">
 <meta property="og:type" content="website">
 <style>
@@ -88,10 +88,19 @@ p.sub{color:var(--muted);max-width:660px;margin:0 0 44px;font-size:17.5px}
 .shot .tag{position:absolute;left:16px;bottom:16px;background:rgba(255,255,255,.93);backdrop-filter:blur(6px);
   border:1px solid var(--line);border-radius:12px;padding:10px 15px;font-size:13.5px;color:var(--plum);font-weight:600;
   box-shadow:0 8px 24px -16px rgba(94,42,56,.7)}
-.wave{width:100%;height:52px;margin-top:26px;overflow:visible}
-.wave path{fill:none;stroke-width:2;stroke-linecap:round;stroke-dasharray:1700;stroke-dashoffset:1700;animation:draw 3.2s .3s ease-out forwards}
-.wave path.w2{animation-delay:.6s}
-@keyframes draw{to{stroke-dashoffset:0}}
+.wave{width:100%;height:62px;margin-top:26px;overflow:hidden;animation:fadein 1s .25s both;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 7%,#000 92%,transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 7%,#000 92%,transparent)}
+.wave path{fill:none}
+/* лента ЭКГ едет справа налево ровно на один удар — стык не виден */
+.ecg-strip{animation:strip 1.05s linear infinite}
+.ecg-strip.resp{animation-duration:4.6s}
+@keyframes strip{to{transform:translateX(-160px)}}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+.ecg-line{stroke:var(--crimson);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.resp-line{stroke:var(--rose);stroke-width:1.6;opacity:.6}
+.ecg-beat{fill:var(--crimson);animation:beat 1.05s ease-out infinite}
+@keyframes beat{0%,56%{r:0;opacity:0}60%{r:5;opacity:.8}100%{r:15;opacity:0}}
 
 /* stats */
 .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--bg2)}
@@ -212,7 +221,7 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
 .mtrack i{font-style:normal;display:inline-flex;align-items:center;gap:11px}
 .mtrack i::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--rose)}
 @keyframes scroll{to{transform:translateX(-50%)}}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}.wave path{stroke-dashoffset:0}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}.wave{opacity:1}}
 </style>
 </head>
 <body>
@@ -222,6 +231,7 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
     <nav class="nav-links">
       <a href="#problem">Кому</a>
       <a href="#method">Метод</a>
+      <a href="#egoscope">Эгоскоп</a>
       <a href="#services">Направления</a>
       <a href="#cases">Кейсы</a>
       <a href="#team">Команда</a>
@@ -246,9 +256,16 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
         <a class="btn ghost" href="#method">Как это работает</a>
       </div>
       <p class="hero-note">Диагностика 40 минут · разбор с аналитиком · отчёт с рекомендациями за 3–5 дней</p>
-      <svg class="wave" viewBox="0 0 640 52" preserveAspectRatio="none" aria-hidden="true">
-        <path stroke="#c4283f" d="M0 26 h56 l10-15 8 30 9-34 10 26 11-7 h60 l9-12 9 22 9-26 10 20 11-5 h70 l10-16 8 30 9-33 10 25 12-6 h64 l9-11 9 20 9-24 10 19 11-4 h120"/>
-        <path class="w2" stroke="#e38795" d="M0 44 q40 -14 80 0 t80 0 80 -10 80 10 80 0 80 -12 80 12 80 0"/>
+      <svg class="wave" viewBox="0 0 640 62" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <pattern id="ecgGrid" width="16" height="16" patternUnits="userSpaceOnUse">
+            <path d="M16 0H0V16" fill="none" stroke="#f6e3e6" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <rect width="640" height="62" fill="url(#ecgGrid)"/>
+        <g class="ecg-strip resp"><path class="resp-line" d="M0 48 q40 -13 80 0 t80 0 q40 -13 80 0 t80 0 q40 -13 80 0 t80 0 q40 -13 80 0 t80 0 q40 -13 80 0 t80 0 q40 -13 80 0 t80 0"/></g>
+        <g class="ecg-strip"><path class="ecg-line" d="M0 30 h26 q7 -10 14 0 h14 l4 6 l6 -30 l6 34 l5 -10 h16 q12 -14 24 0 h45 h26 q7 -10 14 0 h14 l4 6 l6 -30 l6 34 l5 -10 h16 q12 -14 24 0 h45 h26 q7 -10 14 0 h14 l4 6 l6 -30 l6 34 l5 -10 h16 q12 -14 24 0 h45 h26 q7 -10 14 0 h14 l4 6 l6 -30 l6 34 l5 -10 h16 q12 -14 24 0 h45 h26 q7 -10 14 0 h14 l4 6 l6 -30 l6 34 l5 -10 h16 q12 -14 24 0 h45 h26 q7 -10 14 0 h14 l4 6 l6 -30 l6 34 l5 -10 h16 q12 -14 24 0 h45"/></g>
+        <circle class="ecg-beat" cx="128" cy="30" r="0"/>
       </svg>
     </div>
     <div class="shot">
@@ -290,8 +307,8 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
 
 <div class="marq" aria-hidden="true">
   <div class="mtrack">
-    <i>биологическая обратная связь</i><i>ЭЭГ · 2 отведения</i><i>функциональная асимметрия</i><i>альфа · бета · тета</i><i>стресс-тестирование</i><i>нейротренинг</i><i>саморегуляция</i><i>вегетативный баланс</i>
-    <i>биологическая обратная связь</i><i>ЭЭГ · 2 отведения</i><i>функциональная асимметрия</i><i>альфа · бета · тета</i><i>стресс-тестирование</i><i>нейротренинг</i><i>саморегуляция</i><i>вегетативный баланс</i>
+    <i>биологическая обратная связь</i><i>ЭЭГ · 2 отведения</i><i>смысло-эмоциональная значимость</i><i>альфа · бета · тета</i><i>«Эгоскоп» · пиктополиграфия</i><i>нейротренинг</i><i>саморегуляция</i><i>вегетативный баланс</i>
+    <i>биологическая обратная связь</i><i>ЭЭГ · 2 отведения</i><i>смысло-эмоциональная значимость</i><i>альфа · бета · тета</i><i>«Эгоскоп» · пиктополиграфия</i><i>нейротренинг</i><i>саморегуляция</i><i>вегетативный баланс</i>
   </div>
 </div>
 <section id="method">
@@ -327,9 +344,84 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
         <path class="dashflow" d="M230 170C228 202 228 232 230 262" stroke="#e38795" stroke-width="1.6" opacity=".8" style="animation-delay:.8s"/>
         <rect x="88" y="264" width="284" height="90" rx="16" fill="#fdf4f5" stroke="#f8e6e9"/>
         <text x="230" y="292" text-anchor="middle" fill="#5e2a38" font-size="13.5" font-family="Inter,Segoe UI,sans-serif" font-weight="700">Аппаратура БОС «Реакор»</text>
-        <path d="M112 322h30l8-16 10 30 9-24 8 16 10-8 8 8h153" stroke="#c4283f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M112 322h24 q6 -8 12 0 h12 l3 5 l5 -25 l5 28 l4 -8 h14 q10 -12 20 0 h136" stroke="#c4283f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         <text x="230" y="380" text-anchor="middle" fill="#9c8d92" font-size="11.5" font-family="Inter,Segoe UI,sans-serif" letter-spacing="1.6">ВАШИ СОБСТВЕННЫЕ ПОКАЗАТЕЛИ</text>
       </svg>
+    </div>
+  </div>
+</section>
+
+<section id="egoscope" style="background:var(--bg2);border-block:1px solid var(--line)">
+  <div class="wrap split">
+    <div class="reveal">
+      <div class="label">Оборудование и расчёт</div>
+      <h2>«Эгоскоп»: отвечаете вы,<br>значимость показывает тело</h2>
+      <p class="sub">Программно-аппаратный комплекс объективного психологического анализа и тестирования (НПКФ «Медиком МТД», регистрационное удостоверение ФСР 2010/07252, патент РФ №2319444). Пока вы отвечаете стилусом на планшете, комплекс снимает три независимых потока данных — и по каждой шкале теста видно не только что вы ответили, но и насколько сильно тема вас задела.</p>
+      <ol class="steps">
+        <li><b>Автодокументирование</b><span>Ответы, время реакции и сама последовательность действий записываются автоматически — без бумажных бланков и ручного ввода, который вносит искажения.</span></li>
+        <li><b>Пиктополиграфия</b><span>Моторика руки во время ответа: скорость, траектория, нажим стилусом. Видно, где ответ дан уверенно, а где с внутренним сопротивлением.</span></li>
+        <li><b>Психофизиология</b><span>Блок датчиков синхронно с вопросами снимает пульс, кожно-гальваническую и сосудистую реакцию, мышечное напряжение.</span></li>
+        <li><b>Профиль смысло-эмоциональной значимости</b><span>Три потока сводятся в одну величину по каждой шкале: насколько тема отзывается телом — и достоверно ли это отклонение.</span></li>
+      </ol>
+      <div class="tags">
+        <span class="tag-s">структура мотивации</span><span class="tag-s">психологические защиты</span><span class="tag-s">формы агрессии</span><span class="tag-s">более 100 методик в библиотеке</span>
+      </div>
+    </div>
+    <div class="panel reveal">
+      <svg viewBox="0 0 460 400" fill="none" aria-hidden="true">
+        <rect x="70" y="26" width="360" height="278" fill="#fbfcfd" stroke="#c9d2da"/>
+        <!-- пороги выраженности по ответам теста -->
+        <line x1="70" y1="104" x2="430" y2="104" stroke="#cfd8e0" stroke-width="1.2" stroke-dasharray="5 6"/>
+        <line x1="70" y1="212" x2="430" y2="212" stroke="#cfd8e0" stroke-width="1.2" stroke-dasharray="5 6"/>
+        <!-- полоса медианы телесного отклика -->
+        <line x1="244" y1="26" x2="244" y2="304" stroke="#9fb4bd" stroke-width="1.2" stroke-dasharray="5 6"/>
+        <line x1="262" y1="26" x2="262" y2="304" stroke="#9fb4bd" stroke-width="1.2" stroke-dasharray="5 6"/>
+        <text x="253" y="320" text-anchor="middle" fill="#8a949d" font-size="10.5" font-family="Inter,Segoe UI,sans-serif">медиана</text>
+
+        <text x="76" y="18" fill="#8a949d" font-size="10.5" font-family="Inter,Segoe UI,sans-serif" letter-spacing="1.2">ОТВЕТЫ ТЕСТА ↑</text>
+        <text x="430" y="340" text-anchor="end" fill="#8a949d" font-size="10.5" font-family="Inter,Segoe UI,sans-serif" letter-spacing="1.2">ТЕЛЕСНЫЙ ОТКЛИК →</text>
+
+        <path d="M342.0 78.0 L342.0 60.0 A18 18 0 0 1 342.0 96.0 Z" fill="#e8850c" fill-opacity=".85"/><path d="M342.0 78.0 L342.0 96.0 A18 18 0 0 1 324.9 72.4 Z" fill="#2f6fd0" fill-opacity=".85"/><path d="M342.0 78.0 L324.9 72.4 A18 18 0 0 1 342.0 60.0 Z" fill="#2e9e5b" fill-opacity=".85"/><circle cx="342" cy="78" r="18" fill="none" stroke="#2a3138" stroke-width="2.4"/>
+        <path d="M300.0 148.0 L300.0 135.0 A13 13 0 1 1 291.1 157.5 Z" fill="#e8850c" fill-opacity=".85"/><path d="M300.0 148.0 L291.1 157.5 A13 13 0 0 1 300.0 135.0 Z" fill="#2e9e5b" fill-opacity=".85"/><circle cx="300" cy="148" r="13" fill="none" stroke="#ffffff" stroke-width="1.4"/>
+        <circle cx="168" cy="92" r="13" fill="#2f6fd0" fill-opacity=".8"/>
+        <circle cx="205" cy="176" r="10" fill="#8e44c8" fill-opacity=".8"/>
+        <circle cx="140" cy="252" r="11" fill="#c2ccd4" fill-opacity=".85"/>
+        <path d="M352.0 246.0 L352.0 231.0 A15 15 0 1 1 347.4 260.3 Z" fill="#e8850c" fill-opacity=".85"/><path d="M352.0 246.0 L347.4 260.3 A15 15 0 0 1 352.0 231.0 Z" fill="#2e9e5b" fill-opacity=".85"/><circle cx="352" cy="246" r="15" fill="none" stroke="#c0392b" stroke-width="2.6"/>
+        <text x="352" y="278" text-anchor="middle" fill="#c0392b" font-size="10.5" font-family="Inter,Segoe UI,sans-serif" font-weight="700">скрытое напряжение</text>
+
+        <rect x="70" y="352" width="360" height="34" rx="10" fill="#fdf4f5" stroke="#f8e6e9"/>
+        <circle cx="92" cy="369" r="5" fill="#e8850c"/><text x="102" y="373" fill="#5e2a38" font-size="11" font-family="Inter,Segoe UI,sans-serif">чувства</text>
+        <circle cx="172" cy="369" r="5" fill="#2f6fd0"/><text x="182" y="373" fill="#5e2a38" font-size="11" font-family="Inter,Segoe UI,sans-serif">обдумывание</text>
+        <circle cx="283" cy="369" r="5" fill="#2e9e5b"/><text x="293" y="373" fill="#5e2a38" font-size="11" font-family="Inter,Segoe UI,sans-serif">нажим на стилус</text>
+      </svg>
+    </div>
+  </div>
+
+  <div class="wrap" style="margin-top:64px">
+    <div class="reveal">
+      <div class="label">Как считается</div>
+      <h2>Разбор строится на расчёте,<br>а не на впечатлении</h2>
+      <p class="sub">Одна и та же выгрузка «Эгоскопа» у любого специалиста лаборатории даст одни и те же цифры и одни и те же разделы отчёта. Дальше начинается разговор — но уже поверх них.</p>
+    </div>
+    <div class="grid g3 reveal">
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 18V6M4 12h16M20 18V6" stroke-linecap="round"/></svg></div>
+        <h3>Уровень и медиана</h3><p>Балл шкалы считается в процентах от максимума именно этой шкалы, а телесный отклик — относительно медианы вашего же профиля. Вас сравнивают с вами, а не со «средним человеком».</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 19c3-9 6-9 8 0 2-9 5-9 8 0" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <h3>Достоверность отклика</h3><p>У каждого отклонения есть статистическая значимость. Ненадёжный отклик не встаёт в выводы наравне с надёжным — он отмечается как вариативный, зависящий от ситуации.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v8l6 3" stroke-linecap="round"/></svg></div>
+        <h3>Ведущий канал</h3><p>Видно, чем именно откликнулась тема: чувствами (пульс, кожа, сосуды), обдумыванием или мышечным усилием на стилусе. Одна и та же шкала читается по-разному в зависимости от канала.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M4 20V4M4 20h16" stroke-linecap="round"/><circle cx="10" cy="14" r="2.4"/><circle cx="16" cy="8" r="3.2"/></svg></div>
+        <h3>Матрица «когниция × эмоция»</h3><p>Каждая шкала — точка: по вертикали то, что вы ответили, по горизонтали то, как ответило тело. Расхождение между ними видно глазами, без таблиц и без пересказа.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9" stroke-linecap="round"/></svg></div>
+        <h3>Разделы отчёта</h3><p>Шкалы раскладываются по смыслу: выраженные напряжённые формы, привычные формы, скрытое напряжение, не свойственно. Плюс итоги методики — например, индексы агрессивности и враждебности с указанием нормы.</p></div>
+      <div class="card"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 20V6M6 12l6-6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <h3>Один первый шаг</h3><p>Отчёт заканчивается не списком советов, а единственным конкретным действием на ближайшую неделю — на той шкале, которую выбрал расчёт, а не вкус консультанта.</p></div>
+    </div>
+    <div class="reveal" style="margin-top:26px;border:1px solid var(--pink100);border-radius:var(--r);padding:28px 26px;background:var(--pink50)">
+      <h3>Скрытое напряжение — случай, ради которого всё это</h3>
+      <p style="margin:0 0 12px;color:var(--ink2)">По шкале вы ответили сдержанно, ниже порога выраженности, — а тело откликнулось выше медианы, и отклик достоверен. Обычный опросник такую тему не увидит вовсе: в нём она выглядит как «мне это не важно». На матрице это точка слева сверху, и в отчёте у неё отдельный раздел.</p>
+      <p style="margin:0;color:var(--ink2)">Диаграмму, матрицу и все показатели считает алгоритм — детерминированно и воспроизводимо. Нейросеть в лаборатории отвечает только за текст: она получает готовый расчёт и не имеет права его пересчитать или переклассифицировать.</p>
+      <p style="margin:14px 0 0"><a href="blog/chto-takoe-egoskop.html" style="color:var(--crimson);font-weight:650">Подробнее про «Эгоскоп» и его библиотеку тестов →</a></p>
     </div>
   </div>
 </section>
@@ -346,7 +438,7 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
     </div>
     <div class="grid g4 reveal">
       <div class="ring"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="47"/><circle class="bar" cx="60" cy="60" r="47" stroke="#c4283f" data-pct="88"/></svg><div class="cap">Биоэлектрическая активность</div><div class="d">ритмы мозга и их соотношение</div></div>
-      <div class="ring"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="47"/><circle class="bar" cx="60" cy="60" r="47" stroke="#5e2a38" data-pct="74"/></svg><div class="cap">Функциональная асимметрия</div><div class="d">как распределена нагрузка между полушариями</div></div>
+      <div class="ring"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="47"/><circle class="bar" cx="60" cy="60" r="47" stroke="#5e2a38" data-pct="74"/></svg><div class="cap">Смысло-эмоциональная значимость</div><div class="d">какие темы задевают сильнее, чем вы о них говорите</div></div>
       <div class="ring"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="47"/><circle class="bar" cx="60" cy="60" r="47" stroke="#e38795" data-pct="66"/></svg><div class="cap">Сила и адаптированность ЦНС</div><div class="d">запас прочности нервной системы</div></div>
       <div class="ring"><svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="47"/><circle class="bar" cx="60" cy="60" r="47" stroke="#a31e33" data-pct="81"/></svg><div class="cap">Реактивность вегетатики</div><div class="d">как тело отвечает на нагрузку и стресс</div></div>
     </div>
@@ -455,7 +547,7 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
       <p class="sub">Это принципиальная разница с рынком консультантов: за прибором стоит медицинское образование, за выводом — научная работа.</p>
     </div>
     <div class="grid g3 reveal">
-      <div class="person"><div class="av">ГД</div><div class="role">Врач-невролог</div><h3>Денис Грищук</h3><p>Кандидат медицинских наук, старший преподаватель кафедры медицинской психологии, психоневрологии и психиатрии. Проводит нейродиагностику и разъясняет медицинские показатели.</p></div>
+      <div class="person"><div class="av">ПЯ</div><div class="role">Врач-невролог</div><h3>Янa Пaвлeнкo</h3><p>Проводит нейродиагностику: ведёт протокол исследования, отвечает за корректность съёма показателей и разъясняет медицинские результаты на разборе.</p></div>
       <div class="person"><div class="av">ЩВ</div><div class="role">Аналитик, учредитель</div><h3>Владислав Щепочкин</h3><p>Кандидат технических наук, доцент. Старший научный сотрудник НИТИ им. С. П. Капицы УлГУ, соучредитель малого инновационного предприятия — участника «Сколково». Интерпретирует результат.</p></div>
       <div class="person"><div class="av">ГР</div><div class="role">Руководитель, учредитель</div><h3>Радик Гафуров</h3><p>Предприниматель с 2001 года, основатель и руководитель ГК ГЛОБАЛ, президент АПМ РФ в 2011–2014. Лучший предприниматель Ульяновской области 2011 года.</p></div>
     </div>
@@ -478,12 +570,12 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
         <div class="tags"><span class="tag-s">БОС</span><span class="tag-s">методология</span><span class="tag-s">объективные данные</span></div>
       </div></div></div>
 
-      <div class="q"><button>Что показывает ЭЭГ: ритмы и функциональная асимметрия<span class="plus"></span></button><div class="a"><div class="inner">
+      <div class="q"><button>Что показывает ЭЭГ: ритмы и цена нагрузки<span class="plus"></span></button><div class="a"><div class="inner">
         <p>Мозг постоянно генерирует электрическую активность, и она разложима на ритмы. Альфа связан с расслабленным бодрствованием и творческими состояниями, бета — с концентрацией и активной работой, тета — с пограничными состояниями между сном и явью, глубокой релаксацией, доступом к образному мышлению. Соотношение этих ритмов у каждого своё и меняется под нагрузкой.</p>
-        <p>Второй пласт — функциональная асимметрия: как распределяется работа между полушариями. Это не про бытовое «левополушарный человек», а про то, какой контур включается у вас первым, когда задача становится трудной, и насколько дорого вам обходится переключение.</p>
+        <p>Второй пласт — цена нагрузки: как меняется картина ритмов, когда задача становится трудной. Важно не то, справились вы или нет, а сколько это стоило: насколько глубоко система уходит в напряжение и как долго держится там после того, как задача снята.</p>
         <p>Третий — сила, адаптированность и реактивность центральной и вегетативной нервных систем. Это и есть запас прочности: как быстро система выходит на нагрузку и, что важнее, как быстро возвращается обратно.</p>
         <p>По отдельности каждый показатель мало что значит. Смысл появляется в связке — и именно связку разбирает аналитик, а не программа.</p>
-        <div class="tags"><span class="tag-s">ЭЭГ</span><span class="tag-s">альфа · бета · тета</span><span class="tag-s">асимметрия</span></div>
+        <div class="tags"><span class="tag-s">ЭЭГ</span><span class="tag-s">альфа · бета · тета</span><span class="tag-s">цена нагрузки</span></div>
       </div></div></div>
 
       <div class="q"><button>Стрессоустойчивость: что именно измеряется<span class="plus"></span></button><div class="a"><div class="inner">
@@ -596,14 +688,14 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
       "hasMap": "https://yandex.ru/maps/-/CTdFvFiG",
       "areaServed": ["Москва", "Ульяновск", "Казань"],
       "medicalSpecialty": "Neurologic",
-      "knowsAbout": ["биологическая обратная связь", "электроэнцефалография", "нейрофидбэк", "стрессоустойчивость", "функциональная асимметрия"]
+      "knowsAbout": ["биологическая обратная связь", "электроэнцефалография", "нейрофидбэк", "стрессоустойчивость", "психофизиологическое тестирование «Эгоскоп»", "смысло-эмоциональная значимость"]
     },
     {
       "@type": "Service",
       "name": "Нейродиагностика",
       "provider": {"@id": "#org"},
       "serviceType": "Аппаратное исследование мозга по методу биологической обратной связи",
-      "description": "Исследование 40 минут: биоэлектрическая активность, функциональная асимметрия, сила и адаптированность ЦНС, реактивность вегетативной нервной системы. Разбор с аналитиком и отчёт с рекомендациями за 3–5 дней."
+      "description": "Исследование 40 минут: биоэлектрическая активность, смысло-эмоциональная значимость тем теста, сила и адаптированность ЦНС, реактивность вегетативной нервной системы. Разбор с аналитиком и отчёт с рекомендациями за 3–5 дней."
     },
     {
       "@type": "Service",
