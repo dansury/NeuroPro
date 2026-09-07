@@ -192,8 +192,21 @@ p.sub{color:var(--muted);max-width:660px;margin:0 0 44px;font-size:17.5px}
   background:radial-gradient(680px 240px at 50% -10%,var(--pink50),#fff)}
 .cta p{color:var(--muted);max-width:560px;margin:0 auto 30px}
 .note{margin-top:24px;font-size:13.5px;color:var(--faint);max-width:640px;margin-inline:auto}
+.contact-block{display:flex;flex-direction:column;gap:6px;margin:0 0 28px}
+.contact-block a{color:var(--plum);text-decoration:none;font-weight:650}
+.contact-block a:hover{color:var(--crimson)}
+.cta-form{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;max-width:480px;margin:0 auto}
+.cta-form input{flex:1 1 180px;padding:14px 18px;border-radius:999px;border:1.5px solid var(--line);
+  font:inherit;font-size:15px;color:var(--ink)}
+.cta-form input:focus{outline:none;border-color:var(--rose)}
+.cta-form button{flex:0 0 auto}
 footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-size:14px}
 .foot{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center}
+.foot-contact{display:flex;gap:18px;flex-wrap:wrap}
+.foot-contact a{color:inherit;text-decoration:none}
+.foot-contact a:hover{color:var(--crimson)}
+.fullbleed{width:100vw;position:relative;left:50%;transform:translateX(-50%);overflow:hidden;height:clamp(200px,30vw,360px)}
+.fullbleed img{width:100%;height:100%;object-fit:cover;object-position:50% 38%;display:block}
 .marq{border-block:1px solid var(--line);background:var(--bg2);padding:16px 0;overflow:hidden;white-space:nowrap}
 .mtrack{display:inline-flex;gap:40px;animation:scroll 38s linear infinite;font-size:14px;color:var(--muted)}
 .mtrack i{font-style:normal;display:inline-flex;align-items:center;gap:11px}
@@ -214,6 +227,7 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
       <a href="#team">Команда</a>
       <a href="#library">Библиотека</a>
       <a href="#faq">Вопросы</a>
+      <a href="blog/">Блог</a>
     </nav>
     <a class="btn sm" href="#cta">Записаться</a>
   </div>
@@ -320,6 +334,9 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
   </div>
 </section>
 
+<div class="fullbleed">
+  <img src="assets/img01.jpg" alt="Специалист НейроПРО и клиент во время нейродиагностики: установка датчиков биологической обратной связи">
+</div>
 <section id="metrics" style="background:var(--bg2);border-block:1px solid var(--line)">
   <div class="wrap">
     <div class="reveal">
@@ -527,9 +544,18 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
     <div class="cta reveal">
       <h2>Посмотрите на себя<br>как на данные</h2>
       <p>Начните с диагностики: 40 минут исследования, разбор с врачом и аналитиком, отчёт с рекомендациями через 3–5 дней.</p>
-      <a class="btn" href="#cta">Записаться на диагностику
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
-      <p class="note">Телефон, адрес и форма записи намеренно не заполнены: прежние контакты неактуальны. Подставьте актуальные данные и ссылку на запись перед публикацией — места для них отмечены в коде.</p>
+      <div class="contact-block">
+        <a href="tel:+79278004477">+7 927 800 4477</a>
+        <span>Радик Гафуров — запись и вопросы по диагностике</span>
+        <a href="https://yandex.ru/maps/-/CTdFvFiG" target="_blank" rel="noopener">Москва, Красноармейская ул., 4 (ЦДАиК)</a>
+      </div>
+      <form class="cta-form" onsubmit="return npSendCta(event)">
+        <input type="text" name="name" placeholder="Ваше имя" autocomplete="name" required>
+        <input type="tel" name="phone" placeholder="Телефон" autocomplete="tel" required>
+        <button class="btn" type="submit">Записаться на диагностику
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </form>
+      <p class="note">Оставьте имя и телефон — откроется сообщение на +7 927 800 4477 с вашей заявкой, останется отправить. Либо звоните напрямую.</p>
     </div>
   </div>
 </section>
@@ -538,7 +564,12 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
 <footer>
   <div class="wrap foot">
     <span>НейроПРО · Лаборатория повышения личной эффективности</span>
-    <span>Москва · Ульяновск · Казань</span>
+    <div class="foot-contact">
+      <a href="tel:+79278004477">+7 927 800 4477</a>
+      <a href="https://yandex.ru/maps/-/CTdFvFiG" target="_blank" rel="noopener">Москва, Красноармейская ул., 4 (ЦДАиК)</a>
+      <a href="blog/">Блог</a>
+      <span>Москва · Ульяновск · Казань</span>
+    </div>
   </div>
 </footer>
 
@@ -554,6 +585,15 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
       "description": "Лаборатория повышения личной эффективности: аппаратная нейродиагностика по методу биологической обратной связи, разбор с врачом и аналитиком, курс нейротренингов.",
       "logo": "assets/mark.png",
       "image": "assets/hero.jpg",
+      "telephone": "+7-927-800-4477",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "Красноармейская ул., 4 (ЦДАиК)",
+        "addressLocality": "Москва",
+        "addressCountry": "RU"
+      },
+      "geo": {"@type": "GeoCoordinates", "latitude": 55.797306, "longitude": 37.549230},
+      "hasMap": "https://yandex.ru/maps/-/CTdFvFiG",
       "areaServed": ["Москва", "Ульяновск", "Казань"],
       "medicalSpecialty": "Neurologic",
       "knowsAbout": ["биологическая обратная связь", "электроэнцефалография", "нейрофидбэк", "стрессоустойчивость", "функциональная асимметрия"]
@@ -585,6 +625,15 @@ footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-s
 }
 </script>
 <script>
+function npSendCta(e){
+  e.preventDefault();
+  var f = e.target;
+  var name = f.name.value.trim();
+  var phone = f.phone.value.trim();
+  var text = 'Здравствуйте! Хочу записаться на диагностику НейроПРО. Имя: ' + name + '. Телефон для связи: ' + phone;
+  location.href = 'sms:+79278004477?body=' + encodeURIComponent(text);
+  return false;
+}
 (function(){
   var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 

@@ -37,6 +37,28 @@
    маленькие вертикальные срезы, каждый — рабочий и проверяемый.
 6. **Качество.** Перед PR — `bmad-code-review` + `/speckit-analyze`.
 
+### Работа с сайтом (лендинг, блог, маркетинг)
+
+Публичный маркетинговый сайт (`www/index.html` и всё, что не относится к
+самому сервису интерпретации — блог, лендинг, SEO-тексты, объявления,
+письма, соцсети) ведётся **скиллами `aaron-*`** из
+[aaron-marketing-skills](https://github.com/aaron-he-zhu/aaron-marketing-skills)
+(120 скиллов, `.claude/skills/aaron-*`, вендорены в репозиторий как и
+`bmad-*`/`speckit-*`). Правило разделения:
+
+- **Сервис** (`www/app/`, `www/lib/`, `www/setup.php`, всё под «Конституцией
+  проекта» выше) — Spec Kit + BMAD, как описано в разделе «Рабочий процесс».
+- **Сайт** (`www/index.html`, будущий блог, посадочные страницы, рекламные
+  тексты, e-mail-рассылки, соцсети) — скиллы `aaron-*`: SEO/GEO —
+  `aaron-keyword-research`, `aaron-content-writer`, `aaron-on-page-seo-checker`,
+  `aaron-technical-seo-checker`; проверка лендинга перед публикацией —
+  `aaron-landing-experience-checker` / `aaron-landing-optimizer`; нарратив и
+  сообщение бренда — `aaron-strategic-narrative-designer`,
+  `aaron-message-system-architect`. Полный список — в `.claude/skills/aaron-*`.
+  Хук `hooks/claude-hook.sh` из исходного плагина **не устанавливался** —
+  вендорены только сами скиллы (`SKILL.md` + `references/`), без глобального
+  перехвата инструментов.
+
 Артефакты живут в репозитории и версионируются вместе с кодом:
 
 - `.specify/` — движок Spec Kit (шаблоны, скрипты, конституция).
