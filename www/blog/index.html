@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Блог НейроПРО — про Эгоскоп, Реакор и объективную диагностику мозга</title>
+<meta name="description" content="Статьи о методологии НейроПРО: что такое Эгоскоп и Реакор, как работает биологическая обратная связь и почему объективная нейродиагностика точнее опросника.">
+<link rel="icon" href="../assets/favicon.png" type="image/png">
+<style>
+:root{
+  --ink:#1c1418; --ink2:#4a3a40; --muted:#7a6a70; --faint:#9c8d92;
+  --crimson:#c4283f; --crimson-d:#a31e33; --plum:#5e2a38; --rose:#e38795;
+  --pink50:#fdf4f5; --pink100:#f8e6e9; --line:#ecdfe2; --line2:#f4ebed;
+  --bg:#ffffff; --bg2:#fbf8f8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Inter","Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+  font-size:17px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{width:min(100% - 40px,1160px);margin-inline:auto}
+a{color:inherit;text-decoration:none}
+header{border-bottom:1px solid var(--line);padding:16px 0}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand img{width:32px;height:32px;object-fit:contain}
+.brand b{font-size:17px;font-weight:800;color:var(--plum)}
+.brand b span{color:var(--crimson)}
+.back{font-size:14px;color:var(--ink2);font-weight:600}
+main{padding:60px 0 90px}
+h1{font-size:clamp(30px,4.6vw,46px);letter-spacing:-.025em;margin:0 0 14px;font-weight:820}
+p.sub{color:var(--muted);max-width:600px;margin:0 0 48px;font-size:17.5px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+@media(max-width:860px){.grid{grid-template-columns:1fr}}
+.card{border:1px solid var(--line);border-radius:16px;padding:26px 24px;background:#fff;transition:transform .3s,box-shadow .3s,border-color .3s;display:flex;flex-direction:column}
+.card:hover{transform:translateY(-4px);box-shadow:0 12px 32px -18px rgba(94,42,56,.28);border-color:var(--pink100)}
+.card .k{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--rose);font-weight:800;margin-bottom:12px}
+.card h2{font-size:20px;margin:0 0 10px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+.card p{margin:0;color:var(--muted);font-size:15px;flex:1}
+.card .more{margin-top:16px;font-size:14px;font-weight:650;color:var(--crimson)}
+footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:13.5px}
+.foot{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="../"><img src="../assets/mark.png" alt="НейроПРО"><b>Нейро<span>ПРО</span></b></a>
+    <a class="back" href="../">← На главную</a>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <h1>Блог НейроПРО</h1>
+    <p class="sub">О методе, оборудовании и о том, что на самом деле измеряет объективная диагностика мозга.</p>
+    <div class="grid">
+      <a class="card" href="chto-takoe-egoskop.html">
+        <div class="k">Оборудование</div>
+        <h2>Что такое «Эгоскоп»</h2>
+        <p>Как устроена объективная психодиагностика: автодокументирование, пиктополиграфия и профили смысло-эмоциональной значимости.</p>
+        <div class="more">Читать →</div>
+      </a>
+      <a class="card" href="chto-takoe-reakor.html">
+        <div class="k">Оборудование</div>
+        <h2>Что такое «Реакор»</h2>
+        <p>Тренажёр биологической обратной связи: какие сигналы он использует и как устроено нейробиоуправление.</p>
+        <div class="more">Читать →</div>
+      </a>
+      <a class="card" href="bos-obektivnaya-diagnostika.html">
+        <div class="k">Методология</div>
+        <h2>Биологическая обратная связь</h2>
+        <p>Как объективно измерить работу мозга и что происходит на пути от диагностики к тренировке в НейроПРО.</p>
+        <div class="more">Читать →</div>
+      </a>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>НейроПРО · Лаборатория повышения личной эффективности</span>
+    <a href="tel:+79278004477">+7 927 800 4477</a>
+  </div>
+</footer>
+</body>
+</html>

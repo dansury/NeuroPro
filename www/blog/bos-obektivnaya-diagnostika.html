@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Биологическая обратная связь: как объективно измерить работу мозга — НейроПРО</title>
+<meta name="description" content="Что такое биологическая обратная связь (БОС), чем нейродиагностика отличается от психологического опросника, и как устроен путь «Эгоскоп → расчёт → Реакор» в лаборатории НейроПРО.">
+<link rel="icon" href="../assets/favicon.png" type="image/png">
+<meta property="og:title" content="Биологическая обратная связь: как объективно измерить работу мозга">
+<meta property="og:description" content="БОС, ЭЭГ-ритмы, функциональная асимметрия и путь от диагностики на «Эгоскопе» к тренировке на «Реакоре».">
+<meta property="og:type" content="article">
+<style>
+:root{
+  --ink:#1c1418; --ink2:#4a3a40; --muted:#7a6a70; --faint:#9c8d92;
+  --crimson:#c4283f; --crimson-d:#a31e33; --plum:#5e2a38; --rose:#e38795;
+  --pink50:#fdf4f5; --pink100:#f8e6e9; --line:#ecdfe2; --line2:#f4ebed;
+  --bg:#ffffff; --bg2:#fbf8f8; --maxw:760px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Inter","Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+  font-size:17.5px;line-height:1.68;-webkit-font-smoothing:antialiased}
+.wrap{width:min(100% - 40px,var(--maxw));margin-inline:auto}
+a{color:var(--crimson);text-decoration:none}
+a:hover{text-decoration:underline}
+header{border-bottom:1px solid var(--line);padding:16px 0}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:16px;width:min(100% - 40px,1160px);margin-inline:auto}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none}
+.brand img{width:32px;height:32px;object-fit:contain}
+.brand b{font-size:17px;font-weight:800;color:var(--plum)}
+.brand b span{color:var(--crimson)}
+.back{font-size:14px;color:var(--ink2);font-weight:600}
+article{padding:56px 0 80px}
+.kicker{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--crimson);font-weight:700;margin-bottom:14px}
+h1{font-size:clamp(28px,4.4vw,42px);line-height:1.12;letter-spacing:-.02em;margin:0 0 18px;font-weight:820;color:var(--ink)}
+.lede{color:var(--ink2);font-size:19px;margin:0 0 40px}
+h2{font-size:24px;margin:44px 0 14px;font-weight:800;letter-spacing:-.015em}
+p{margin:0 0 18px;color:var(--ink2)}
+ul{margin:0 0 18px;padding-left:22px;color:var(--ink2)}
+li{margin-bottom:8px}
+.steps{counter-reset:s;padding:0;margin:0 0 18px;list-style:none}
+.steps li{counter-increment:s;padding:14px 0 14px 46px;position:relative;border-bottom:1px solid var(--line2)}
+.steps li::before{content:counter(s);position:absolute;left:0;top:14px;width:28px;height:28px;border-radius:9px;
+  display:grid;place-items:center;font-size:12px;font-weight:800;color:var(--crimson);background:var(--pink50);border:1px solid var(--pink100)}
+.callout{background:var(--pink50);border:1px solid var(--pink100);border-radius:14px;padding:22px 24px;margin:28px 0;color:var(--ink2)}
+.callout b{color:var(--plum)}
+.src{font-size:13.5px;color:var(--faint);margin-top:44px;border-top:1px solid var(--line2);padding-top:18px}
+.cta-inline{display:inline-flex;align-items:center;gap:9px;padding:13px 24px;border-radius:999px;
+  font-weight:650;font-size:15px;background:var(--crimson);color:#fff!important;margin-top:8px}
+.cta-inline:hover{background:var(--crimson-d);text-decoration:none}
+footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:13.5px}
+.foot{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;width:min(100% - 40px,1160px);margin-inline:auto}
+.foot a{color:inherit}
+</style>
+</head>
+<body>
+<header>
+  <div class="nav">
+    <a class="brand" href="../"><img src="../assets/mark.png" alt="НейроПРО"><b>Нейро<span>ПРО</span></b></a>
+    <a class="back" href="./">← Все статьи</a>
+  </div>
+</header>
+
+<article>
+  <div class="wrap">
+    <div class="kicker">Методология</div>
+    <h1>Биологическая обратная связь: как объективно измерить работу мозга</h1>
+    <p class="lede">Тревожность, стрессоустойчивость, способность концентрироваться — обычно про это спрашивают. НейроПРО это измеряет. Разбираем метод биологической обратной связи и путь от диагностики к тренировке.</p>
+
+    <p>Биологическая обратная связь (БОС) — метод, при котором физиологический показатель человека (электрическая активность мозга, кожно-гальваническая реакция, дыхание, частота сердечных сокращений и другие) регистрируется аппаратурой напрямую, а не восстанавливается по словам самого человека. Это медицинский и психофизиологический метод с полувековой историей: он не заменяет психологическую беседу, а даёт ей объективную опору — измерение вместо самоотчёта.</p>
+
+    <h2>Что именно измеряется</h2>
+    <p>В нейродиагностике за счёт электроэнцефалографии (ЭЭГ) регистрируется биоэлектрическая активность мозга, разложимая на ритмы:</p>
+    <ul>
+      <li><b>Альфа-ритм</b> — связан с расслабленным бодрствованием и творческими состояниями.</li>
+      <li><b>Бета-ритм</b> — с концентрацией и активной работой.</li>
+      <li><b>Тета-ритм</b> — с пограничными состояниями между сном и бодрствованием, глубокой релаксацией.</li>
+    </ul>
+    <p>Отдельный пласт данных — <b>функциональная асимметрия</b>: как распределяется нагрузка между полушариями при усложнении задачи. И третий — сила, адаптированность и реактивность центральной и вегетативной нервных систем: запас прочности, то есть насколько быстро система выходит на нагрузку и, что важнее, насколько быстро возвращается обратно в спокойное состояние.</p>
+
+    <h2>Путь от диагностики к тренировке</h2>
+    <p>В лаборатории НейроПРО метод реализован через связку двух сертифицированных комплексов производства «Медиком МТД» (Таганрог):</p>
+    <ol class="steps">
+      <li><b>Диагностика на «Эгоскопе».</b> Комплекс сопоставляет ответы человека на тест-опросник с профилем смысло-эмоциональной значимости (СЭЗ) — независимым физиологическим откликом на каждую тему. Подробнее — в статье <a href="chto-takoe-egoskop.html">«Что такое Эгоскоп»</a>, официальный сайт производителя — <a href="https://egoscop.ru" target="_blank" rel="noopener">egoscop.ru</a>.</li>
+      <li><b>Математический расчёт.</b> НейроПРО детерминированно, без участия нейросети, определяет уровень каждой шкалы, её положение относительно медианы, достоверность отклика и ведущий психофизиологический канал — и строит на этом диаграмму и матрицу «когниция × эмоция».</li>
+      <li><b>Разбор с врачом и аналитиком.</b> Врач-невролог объясняет медицинские показатели, аналитик — что они означают для рабочих задач, отношений и планов.</li>
+      <li><b>Нейротренинг на «Реакоре».</b> Если нужна не только картина, но и тренировка — саморегуляция отрабатывается по обратной связи на комплексе «Реакор»: человек видит собственный показатель на экране в реальном времени и учится им управлять. Подробнее — в статье <a href="chto-takoe-reakor.html">«Что такое Реакор»</a>, официальная страница оборудования — <a href="https://www.reakor.ru" target="_blank" rel="noopener">reakor.ru</a>.</li>
+    </ol>
+
+    <div class="callout">
+      <b>Почему это не эзотерика и не «сила мысли».</b> Все данные — цифровые показатели с сертифицированной медицинской аппаратуры. Результат нельзя осознанно подготовить или «правильно» ответить: физиологическая реакция опережает сознательную самопрезентацию.
+    </div>
+
+    <p>Такой подход отличает нейродиагностику от психологического тестирования в привычном смысле: там, где консультант строит гипотезу и проверяет её разговором, здесь разговор с аналитиком идёт уже поверх объективных данных, а не вместо них.</p>
+
+    <p><a class="cta-inline" href="../#cta">Записаться на диагностику НейроПРО</a></p>
+
+    <div class="src">Источники: техническая документация комплексов «Эгоскоп» и «Реакор» (НПКФ «Медиком МТД»), внутренняя база знаний НейроПРО.</div>
+  </div>
+</article>
+
+<footer>
+  <div class="foot">
+    <span>НейроПРО · Лаборатория повышения личной эффективности</span>
+    <a href="tel:+79278004477">+7 927 800 4477</a>
+  </div>
+</footer>
+</body>
+</html>
