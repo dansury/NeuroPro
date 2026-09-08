@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Что происходит на исследовании и что вы уносите — НейроПРО</title>
+<meta name="description" content="Как проходит час исследования в НейроПРО, что видно в результате, чего метод не делает и почему к нему нельзя подготовиться. Для тех, кто думает записаться.">
+<link rel="icon" href="../assets/favicon.png" type="image/png">
+<meta property="og:title" content="Что происходит на исследовании и что вы уносите">
+<meta property="og:description" content="Час, разбор, один конкретный шаг. Разбираем по шагам: что снимают, что показывают, чего не делают.">
+<meta property="og:type" content="article">
+<style>
+:root{
+  --ink:#1c1418; --ink2:#4a3a40; --muted:#7a6a70; --faint:#9c8d92;
+  --crimson:#c4283f; --crimson-d:#a31e33; --plum:#5e2a38; --rose:#e38795;
+  --pink50:#fdf4f5; --pink100:#f8e6e9; --line:#ecdfe2; --line2:#f4ebed;
+  --bg:#ffffff; --bg2:#fbf8f8; --maxw:760px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Inter","Segoe UI",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+  font-size:17.5px;line-height:1.68;-webkit-font-smoothing:antialiased}
+.wrap{width:min(100% - 40px,var(--maxw));margin-inline:auto}
+a{color:var(--crimson);text-decoration:none}
+a:hover{text-decoration:underline}
+header{border-bottom:1px solid var(--line);padding:16px 0}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:16px;width:min(100% - 40px,1160px);margin-inline:auto}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none}
+.brand img{width:32px;height:32px;object-fit:contain}
+.brand b{font-size:17px;font-weight:800;color:var(--plum)}
+.brand b span{color:var(--crimson)}
+.back{font-size:14px;color:var(--ink2);font-weight:600}
+article{padding:56px 0 80px}
+.kicker{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--crimson);font-weight:700;margin-bottom:14px}
+h1{font-size:clamp(28px,4.4vw,42px);line-height:1.12;letter-spacing:-.02em;margin:0 0 18px;font-weight:820;color:var(--ink)}
+.lede{color:var(--ink2);font-size:19px;margin:0 0 40px}
+h2{font-size:24px;margin:44px 0 14px;font-weight:800;letter-spacing:-.015em}
+h3{font-size:19px;margin:30px 0 10px;font-weight:750;letter-spacing:-.01em}
+p{margin:0 0 18px;color:var(--ink2)}
+ul,ol{margin:0 0 18px;padding-left:22px;color:var(--ink2)}
+li{margin-bottom:8px}
+table{width:100%;border-collapse:collapse;margin:0 0 22px;font-size:15.5px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);color:var(--ink2);vertical-align:top}
+th{color:var(--plum);font-weight:700;background:var(--bg2)}
+.scroll{overflow-x:auto;margin:0 0 22px}
+.callout{background:var(--pink50);border:1px solid var(--pink100);border-radius:14px;padding:22px 24px;margin:28px 0;color:var(--ink2)}
+.callout b{color:var(--plum)}
+.callout p:last-child{margin-bottom:0}
+.src{font-size:13.5px;color:var(--faint);margin-top:44px;border-top:1px solid var(--line2);padding-top:18px}
+.cta-inline{display:inline-flex;align-items:center;gap:9px;padding:13px 24px;border-radius:999px;
+  font-weight:650;font-size:15px;background:var(--crimson);color:#fff!important;margin-top:8px}
+.cta-inline:hover{background:var(--crimson-d);text-decoration:none}
+.cta-call{margin:48px 0 0;padding:30px 28px;border:1px solid var(--pink100);background:var(--pink50);border-radius:18px}
+.cta-call h2{margin:0 0 10px;font-size:22px}
+.cta-call p{margin:0 0 18px;color:var(--ink2)}
+.cta-call .btn{display:inline-flex;align-items:center;gap:10px;padding:15px 28px;border-radius:999px;
+  font-weight:700;font-size:17px;background:var(--crimson);color:#fff!important;
+  box-shadow:0 10px 26px -14px rgba(196,40,63,.9);transition:transform .25s,background .25s}
+.cta-call .btn:hover{background:var(--crimson-d);transform:translateY(-2px);text-decoration:none}
+.cta-call .who{margin:14px 0 0;font-size:14.5px;color:var(--muted)}
+.tg{display:inline-flex;align-items:center;gap:9px;padding:13px 24px;border-radius:999px;font-weight:650;font-size:15.5px;
+  background:#fff;color:var(--plum)!important;border:1.5px solid var(--line)}
+.tg:hover{border-color:var(--rose);background:#fff;color:var(--crimson)!important;text-decoration:none}
+.more{margin-top:44px;padding-top:22px;border-top:1px solid var(--line2);font-size:15.5px;color:var(--muted)}
+.more a{font-weight:600}
+footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:13.5px}
+.foot{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;width:min(100% - 40px,1160px);margin-inline:auto}
+.foot a{color:inherit}
+</style>
+</head>
+<body>
+<header>
+  <div class="nav">
+    <a class="brand" href="../"><img src="../assets/mark.png" alt="НейроПРО"><b>Нейро<span>ПРО</span></b></a>
+    <a class="back" href="./">← Все статьи</a>
+  </div>
+</header>
+
+<article>
+  <div class="wrap">
+    <div class="kicker">Для частных клиентов</div>
+    <h1>Что происходит на исследовании и что вы уносите</h1>
+    <p class="lede">Без научных подробностей и без обещаний. По шагам: что с вами делают в течение часа, что именно видно в результате, чего метод не делает — и почему к нему невозможно подготовиться, даже если очень захотеть.</p>
+
+    <h2>Зачем люди приходят</h2>
+
+    <p>Почти никогда — «узнать о себе что-нибудь интересное». Обычно есть конкретное событие, после которого стало неудобно откладывать:</p>
+
+    <ul>
+      <li>Третий квартал подряд усилия те же, а результат меньше — и непонятно, дело в рынке или в вас.</li>
+      <li>Решение висит месяцами. Вы возвращаетесь к нему каждую неделю и не двигаетесь.</li>
+      <li>Раздражение там, где раньше его не было. На тех же людях, в тех же ситуациях.</li>
+      <li>Сон не восстанавливает, а обследования ничего не находят.</li>
+      <li>Вы перестали доверять собственной оценке своего состояния.</li>
+    </ul>
+
+    <p>Последний пункт — ключевой. Если вы годами тренировались выглядеть собранным, вы натренировали этот навык и на себе тоже. Спрашивать себя «а как я вообще» в такой ситуации бесполезно: отвечает тот же натренированный человек.</p>
+
+    <h2>Час, по шагам</h2>
+
+    <h3>Шаг 1. Вы отвечаете на методику — около 40 минут</h3>
+    <p>Обычный психологический опросник на планшете, стилусом. Вопросы понятные, специально ничего делать не нужно, «правильных» ответов нет. Отвечайте как отвечается — это важно.</p>
+
+    <h3>Шаг 2. Параллельно снимается реакция — вы этого не чувствуете</h3>
+    <p>Пока вы отвечаете, приборы независимо регистрируют три вещи: реакцию вегетативной нервной системы (пульс, кожа, сосуды), мышечное напряжение и моторику руки — скорость, траекторию, нажим стилусом.</p>
+    <p>Процедура пассивная: приборы только считывают сигналы и ничего не подают в организм. Никаких уколов, никакого воздействия. Исследование проводит врач.</p>
+
+    <h3>Шаг 3. Расчёт</h3>
+    <p>По каждой шкале методики сопоставляются две величины: что вы ответили и насколько сильно тема отозвалась телом. Считается это математически — уровень, достоверность отклика, положение относительно вашей же средней. Никакой «трактовки на глаз» на этом этапе нет.</p>
+
+    <h3>Шаг 4. Разбор — до 40 минут</h3>
+    <p>Врач объясняет физиологическую часть, аналитик — что это значит для ваших решений, работы и отношений. Это не лекция: вы задаёте вопросы, спорите, уточняете.</p>
+
+    <h3>Шаг 5. Что вы уносите</h3>
+    <p>Разбор в кабинете и письменный отчёт следом. В отчёте: сильные и слабые зоны, где у вас максимальный и минимальный запас, и — <b>одно конкретное действие</b>, с которого начать. Не двадцать рекомендаций: одно.</p>
+
+    <h2>Главное, что видно в результате</h2>
+
+    <p>Самое ценное — не «высокие» и «низкие» шкалы. Их вам и так расскажет любой опросник.</p>
+
+    <p>Ценно <b>расхождение</b>: тема, по которой вы ответили «меня это не задевает», а тело откликнулось сильнее, чем на всё остальное. Или наоборот — тема, которую вы считаете для себя важной, а никакого отклика нет.</p>
+
+    <div class="callout">
+      <b>Почему к этому нельзя подготовиться.</b> Ответ на вопрос вы формулируете сознательно — и можете, осознанно или нет, подать себя определённым образом. Реакция тела на тему опережает эту формулировку: она происходит раньше, чем включается то, что мы называем самопрезентацией. Поэтому расхождение между двумя картинами нельзя ни подстроить, ни отрепетировать, ни «пройти правильно».
+    </div>
+
+    <p>Практически расхождение чаще всего означает одно из двух: тема действительно важна, а вы её вытеснили — или тема отработана до автоматизма и больше не требует усилий. Что именно из двух — разбирается на месте, это и есть работа аналитика.</p>
+
+    <h2>Чего метод не делает</h2>
+
+    <ul>
+      <li><b>Не ставит диагнозов.</b> Это не медицинское заключение, оно никуда не передаётся и на вашу медицинскую историю не влияет.</li>
+      <li><b>Не предсказывает будущее.</b> Не говорит, получится ли у вас бизнес и стоит ли уходить с работы. Он даёт основание для решения — решаете вы.</li>
+      <li><b>Не читает мысли и не проверяет на правду.</b> Это не полиграф; мы не устанавливаем факты.</li>
+      <li><b>Не заменяет психотерапию.</b> Если вам нужна работа с состоянием вдолгую, это другой формат. Метод даёт объективную отправную точку, а не сопровождение.</li>
+      <li><b>Не даёт «объективной оценки личности».</b> Он показывает ваше состояние сейчас и значимость тем сейчас. Через полгода картина может быть другой — и это нормально.</li>
+    </ul>
+
+    <h2>Что чаще всего останавливает</h2>
+
+    <h3>«А если я увижу о себе что-то, с чем потом жить?»</h3>
+    <p>Вы почти наверняка увидите свои слабые зоны — в этом и смысл. Разница в том, что слабое место, о котором вы знаете, перестаёт управлять вами незаметно: его можно обойти расстановкой задач, компенсировать людьми рядом или натренировать. Отчёт устроен так, что каждая слабая зона идёт вместе с тем, что с ней делать. Это координата, а не приговор.</p>
+
+    <h3>«Это не опасно?»</h3>
+    <p>Процедура пассивная и неинвазивная. Приборы считывают сигналы, ничего не подавая в организм. Оборудование зарегистрировано как медицинское изделие, исследование проводит врач.</p>
+
+    <h3>«А если я не поверю результату?»</h3>
+    <p>Разумное сомнение. Поэтому вам показывают не вывод, а расчёт: по каждой шкале видно, что вы ответили, как отозвалось тело и достоверно ли это отклонение. Спорить с интерпретацией можно и нужно — но сначала вы увидите числа.</p>
+
+    <h3>«Об этом узнают на работе?»</h3>
+    <p>Нет. Частное исследование не передаётся никому, включая работодателя. Корпоративные форматы — отдельная услуга с отдельным договором и отдельными правилами.</p>
+
+    <h3>«Мне нужно к этому готовиться?»</h3>
+    <p>Нет, и в этом весь смысл. Единственное, что помогает: выспаться накануне и не приходить сразу после тяжёлого разговора — вы измеряете состояние, а не рекорд.</p>
+
+    <h2>Кому это скорее не подойдёт</h2>
+
+    <p>Честно, чтобы вы не потратили время зря:</p>
+
+    <ul>
+      <li>Если вам просто любопытно, а конкретного вопроса нет — вы получите интересный час и, скорее всего, ничего не измените. Это дорогое развлечение.</li>
+      <li>Если вы ищете медицинский диагноз или лечение — вам нужен врач соответствующего профиля, а не это исследование.</li>
+      <li>Если вы хотите, чтобы за вас приняли решение, — метод даёт основание, но выбор остаётся ваш. Это не консультация «как надо».</li>
+    </ul>
+
+    <div class="more">
+      Если хочется в детали метода: <a href="podhod-k-egoskopii-dlya-kolleg.html">как устроен наш разбор</a> · <a href="chto-takoe-egoskop.html">что такое «Эгоскоп»</a> · <a href="bos-obektivnaya-diagnostika.html">биологическая обратная связь</a> · <a href="chto-takoe-reakor.html">что такое «Реакор»</a>
+    </div>
+
+    <div class="cta-call">
+      <h2>Задать вопрос или записаться</h2>
+      <p>Если после текста остались вопросы — позвоните. Радик ответит на них сам и без записи на исследование, если она вам не нужна.</p>
+      <a class="btn" href="tel:+79278004477">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z"/></svg>
+        Позвонить: +7 927 800 4477
+      </a>
+      <p class="who">Радик Гафуров — руководитель НейроПРО</p>
+    </div>
+
+    <div class="src">Источники: внутренняя методическая база НейроПРО, техническая документация комплекса «Эгоскоп» (регистрационное удостоверение ФСР 2010/07252), практика разборов.</div>
+  </div>
+</article>
+<footer>
+  <div class="foot">
+    <span>НейроПРО · Объективная диагностика состояния</span>
+    <a href="tel:+79278004477">+7 927 800 4477</a>
+  </div>
+</footer>
+</body>
+</html>
