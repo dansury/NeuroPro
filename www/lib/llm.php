@@ -831,6 +831,15 @@ SYS;
         ];
     }
 
+    /** Адрес модели у Яндекса: gpt://<папка>/<слаг>/<версия>. Версию хранит не
+     *  слаг, а адрес, поэтому «latest» дописывается здесь — а вписанная руками
+     *  версия («yandexgpt/rc») остаётся как есть и не удваивается. */
+    private static function yandexModelUri(string $folder, string $fullId): string {
+        $fullId = trim($fullId, " /");
+        if (!preg_match('~/(latest|rc|deprecated)$~', $fullId)) $fullId .= '/latest';
+        return 'gpt://' . $folder . '/' . $fullId;
+    }
+
     /** Build a configured cURL handle for the active provider/model (no curl_exec). */
     private static function buildCurl(array $modelRow, array $messages, float $temp, bool $jsonMode, array $extra) {
         $cfg = self::cfg();
@@ -841,7 +850,7 @@ SYS;
             if ($folder === '' || empty($cfg['YANDEX_API_KEY'])) {
                 throw new RuntimeException('Yandex LLM not configured (YANDEX_API_KEY / YANDEX_FOLDER_ID empty)');
             }
-            $modelStr = 'gpt://' . $folder . '/' . $modelRow['full_id'] . '/latest';
+            $modelStr = self::yandexModelUri($folder, (string) $modelRow['full_id']);
             $headers = [
                 'Authorization: Api-Key ' . $cfg['YANDEX_API_KEY'],
                 'x-folder-id: ' . $folder,
@@ -959,7 +968,7 @@ SYS;
             if ($folder === '' || empty($cfg['YANDEX_API_KEY'])) {
                 throw new RuntimeException('Yandex LLM not configured (YANDEX_API_KEY / YANDEX_FOLDER_ID empty)');
             }
-            $modelStr = 'gpt://' . $folder . '/' . $modelRow['full_id'] . '/latest';
+            $modelStr = self::yandexModelUri($folder, (string) $modelRow['full_id']);
             $headers = [
                 'Authorization: Api-Key ' . $cfg['YANDEX_API_KEY'],
                 'x-folder-id: ' . $folder,
