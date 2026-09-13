@@ -19,6 +19,7 @@ require_once __DIR__ . '/interpret.php';
 require_once __DIR__ . '/trash.php';
 require_once __DIR__ . '/settings_store.php';
 require_once __DIR__ . '/openrouter_free.php';
+require_once __DIR__ . '/auto_pull.php';
 
 function np_boot(): array {
     static $cfg = null;
@@ -37,6 +38,15 @@ function np_boot(): array {
     Metrics::configure($cfg);
 
     np_seed_prompts($cfg);
+
+    // Автообновление кода: пока в настройках стоит галочка, каждое открытие
+    // страницы тихо спрашивает у GitHub head отслеживаемой ссылки и, если
+    // коммит новее выложенного, запускает pull.php и возвращает браузер на ту
+    // же страницу — уже на новом коде. Креды берутся из pull-config.php в
+    // корне сайта; состояние пишется в каталог данных НАД веб-корнем, который
+    // деплой не перезаписывает.
+    AutoPull::run(AutoPull::options($cfg, ['state_dir' => dirname((string) $cfg['DB_PATH'])]));
+
     return $cfg;
 }
 
