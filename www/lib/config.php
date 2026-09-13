@@ -131,6 +131,9 @@ if (!function_exists('cfg_settings_whitelist')) {
             'ADMIN_EMAIL', 'ERROR_EMAIL',
             'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME',
             'ADMIN_PASSWORD',
+            // Автообновление кода: галочка на время активной разработки
+            // (lib/auto_pull.php). Кредов здесь нет — они в pull-config.php.
+            'AUTOPULL_ENABLED', 'AUTOPULL_INTERVAL', 'AUTOPULL_URL',
             // Матрица: пороги пунктира и контраст размеров кружков. Оператор
             // двигает пунктир прямо на матрице — значение уходит сюда же.
             'MATRIX_LOW_PCT', 'MATRIX_HIGH_PCT', 'MATRIX_MID_BAND_PCT', 'MATRIX_SIZE_POWER',
@@ -237,6 +240,11 @@ $config = [
     'SMTP_FROM_NAME'        => cfg_env('SMTP_FROM_NAME', '4neuropro'),
 
     /* ── Storage ── */
+    /* ── Автообновление кода с GitHub (lib/auto_pull.php) ── */
+    'AUTOPULL_ENABLED'      => cfg_env('AUTOPULL_ENABLED', '0'),
+    'AUTOPULL_INTERVAL'     => (int) cfg_env('AUTOPULL_INTERVAL', '0'),  // 0 — при каждом открытии страницы
+    'AUTOPULL_URL'          => cfg_env('AUTOPULL_URL', ''),              // пусто — адрес вычисляется сам
+
     'DB_PATH'               => cfg_env('DB_PATH', cfg_data_root() . '/app.db'),
     'LOG_DIR'               => cfg_env('LOG_DIR', cfg_data_root() . '/logs'),
     'PROMPT_VERSION'        => 'v1.0',
@@ -386,7 +394,7 @@ $config = [
     $dbPath = $config['DB_PATH'];
     if (!is_string($dbPath) || !file_exists($dbPath)) return;
     $overlayKeys = cfg_settings_whitelist();
-    $intKeys = ['SMTP_PORT'];
+    $intKeys = ['SMTP_PORT', 'AUTOPULL_INTERVAL'];
     $csvKeys = ['LLM_OCR_MODELS']; // stored comma-separated, consumed as array
     try {
         $pdo = new PDO('sqlite:' . $dbPath);
